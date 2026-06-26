@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: garion-x-backend
+    env: docker
+    plan: free
+    dockerContext: .
+    dockerfilePath: Dockerfile
+    envVars:
+      - key: CONNECTION_STRING
+        sync: false # Nilai akan dimasukkan secara manual di dashboard Render
+      - key: GEMINI_API_KEY
+        sync: false # Nilai akan dimasukkan secara manual di dashboard Render
+      - key: ASPNETCORE_ENVIRONMENT
+        value: Production

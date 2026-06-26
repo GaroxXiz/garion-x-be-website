@@ -1,0 +1,21 @@
+# .NET / C# build folders
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+# Uploads & temporary testing files
+wwwroot/uploads/
+
+# Sensitive files
+.env
+appsettings.Development.json
+
+# System & OS
+.DS_Store
+Thumbs.db
+*.tmp
+*.bak
