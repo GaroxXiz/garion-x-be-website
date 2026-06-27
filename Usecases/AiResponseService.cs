@@ -33,6 +33,10 @@ public class AiResponseService : IAiResponseService
         {
             var personality = await _chatRepository.GetPersonalityByIdAsync(personalityId);
             string systemPrompt = personality?.SystemPrompt ?? "You are a helpful assistant.";
+            
+            // Global instruction for multilingual / auto-translate support
+            systemPrompt += "\n\n[System Instruction: You must respond in the same language as the user's message. If the user writes in Indonesian, respond in Indonesian. If they write in English, Spanish, Japanese, French, or any other language, automatically adapt and respond in that exact language while preserving your assigned personality, tone, and character.]";
+
             var rawHistory = await _chatRepository.GetMessagesAsync(chatId);
             var historyList = rawHistory.ToList();
             int lastUserIdx = historyList.FindLastIndex(m => m.Sender == "user");
