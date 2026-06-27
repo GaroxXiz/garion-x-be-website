@@ -84,7 +84,8 @@ if (string.IsNullOrEmpty(connectionString))
 }
 
 builder.Services.AddDbContext<GarionXDbContext>(options =>
-    options.UseNpgsql(connectionString, b => b.MigrationsAssembly("GarionX")));
+    options.UseNpgsql(connectionString, b => b.MigrationsAssembly("GarionX"))
+           .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning)));
 
 // 2. Register Repositories and Services
 builder.Services.AddHttpClient();
