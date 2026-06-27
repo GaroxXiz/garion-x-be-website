@@ -34,6 +34,30 @@ var builder = WebApplication.CreateBuilder(args);
 var connectionString = Environment.GetEnvironmentVariable("CONNECTION_STRING") 
     ?? Environment.GetEnvironmentVariable("DATABASE_URL");
 
+if (!string.IsNullOrEmpty(connectionString) && connectionString.StartsWith("postgresql://"))
+{
+    try
+    {
+        var uri = new Uri(connectionString);
+        var userInfo = uri.UserInfo.Split(':', 2);
+        var username = userInfo[0];
+        var password = userInfo.Length > 1 ? userInfo[1] : "";
+        var host = uri.Host;
+        var port = uri.Port > 0 ? uri.Port : 5432;
+        var database = uri.AbsolutePath.TrimStart('/');
+
+        // Decode URL encoded values if any (especially password/username)
+        username = Uri.UnescapeDataString(username);
+        password = Uri.UnescapeDataString(password);
+
+        connectionString = $"Host={host};Port={port};Database={database};Username={username};Password={password};SSL Mode=Require;Trust Server Certificate=true";
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[GarionX Backend] Error parsing PostgreSQL URI: {ex.Message}");
+    }
+}
+
 if (string.IsNullOrEmpty(connectionString))
 {
     var dbHost = Environment.GetEnvironmentVariable("DB_HOST");
