@@ -402,4 +402,84 @@ public class AuthController : ControllerBase
             AvatarUrl = updatedUser.AvatarUrl
         });
     }
+
+    private static readonly Dictionary<string, (string Otp, DateTime Expiry)> OtpStore = new();
+
+    [HttpPost("send-otp")]
+    public IActionResult SendOtp([FromBody] SendOtpRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email))
+        {
+            return BadRequest("Email is required.");
+        }
+
+        // Generate 6 digit OTP
+        var random = new Random();
+        var otp = random.Next(100000, 999999).ToString();
+        var expiry = DateTime.UtcNow.AddMinutes(5);
+
+        // Store OTP
+        OtpStore[request.Email.ToLower()] = (otp, expiry);
+
+        // Log OTP to console (so developer/admin can see it in terminal logs)
+        Console.WriteLine($"[GARIONX OTP] Code for {request.Email} is: {otp}");
+
+        // Return it in response for debugging/mock presentation purposes
+        return Ok(new { message = "OTP sent successfully to email.", otp = otp });
+    }
+
+    [HttpPost("verify-otp")]
+    public async Task<ActionResult<AuthResponse>> VerifyOtp([FromBody] VerifyOtpRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Otp))
+        {
+            return BadRequest("Email and OTP are required.");
+        }
+
+        var emailKey = request.Email.ToLower();
+        if (!OtpStore.TryGetValue(emailKey, out var value) || value.Otp != request.Otp || DateTime.UtcNow > value.Expiry)
+        {
+            return BadRequest("Invalid or expired OTP code.");
+        }
+
+        // OTP is verified, remove it
+        OtpStore.Remove(emailKey);
+
+        // Find user by email
+        var user = await _chatRepository.GetUserByUsernameAsync(request.Email);
+        if (user == null)
+        {
+            // If user doesn't exist, register them on the fly
+            var username = request.Email.Split('@')[0];
+            // Ensure unique username
+            var suffix = 0;
+            var uniqueUsername = username;
+            while (await _chatRepository.GetUserByUsernameAsync(uniqueUsername) != null)
+            {
+                suffix++;
+                uniqueUsername = $"{username}{suffix}";
+            }
+
+            user = new User
+            {
+                Username = uniqueUsername,
+                PasswordHash = HashPassword(Guid.NewGuid().ToString()), // Random hash for passwordless
+                Email = request.Email,
+                Name = string.IsNullOrWhiteSpace(request.Name) ? username : request.Name,
+                AvatarUrl = $"https://api.dicebear.com/7.x/bottts/svg?seed={Uri.EscapeDataString(uniqueUsername)}"
+            };
+            user = await _chatRepository.RegisterUserAsync(user);
+        }
+
+        var token = _tokenGenerator.GenerateToken(user);
+
+        return Ok(new AuthResponse
+        {
+            Token = token,
+            Username = user.Username,
+            Email = user.Email,
+            Name = user.Name,
+            AvatarUrl = user.AvatarUrl
+        });
+    }
 }
