@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Text.RegularExpressions;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -258,9 +259,22 @@ public class ChatsController : ControllerBase
             }
         }
 
-        // 3. Enrich context for AI video summarization
+        // 3. Enrich context for AI video summarization or real-time web search
         string aiPromptContent = request.Content;
-        if (activePersonalityId == "video_summarizer" && attachmentType == "video")
+        if (activePersonalityId == "web_scout")
+        {
+            string searchQuery = request.Content;
+            string lowerQuery = searchQuery.ToLower();
+            if (lowerQuery.StartsWith("cari tentang ")) searchQuery = searchQuery.Substring(13);
+            else if (lowerQuery.StartsWith("cari ")) searchQuery = searchQuery.Substring(5);
+            else if (lowerQuery.StartsWith("search web for ")) searchQuery = searchQuery.Substring(15);
+            else if (lowerQuery.StartsWith("search for ")) searchQuery = searchQuery.Substring(11);
+            else if (lowerQuery.StartsWith("search ")) searchQuery = searchQuery.Substring(7);
+
+            var searchResults = await SearchWebAsync(searchQuery);
+            aiPromptContent += $"\n\n[SYSTEM REAL-TIME SEARCH PROTOCOL: You have been provided with real-time web search results matching the query: '{searchQuery}'.\n\n{searchResults}\n\nYour Task: Generate a comprehensive, accurate response based on these results. Reference and cite your sources using bracketed numbers like [1], [2], etc., corresponding to the search results. Maintain a professional, highly informative, and analytical cybernetic Web Scout tone.]";
+        }
+        else if (activePersonalityId == "video_summarizer" && attachmentType == "video")
         {
             if (hasVideoUrl)
             {
@@ -299,6 +313,8 @@ public class ChatsController : ControllerBase
                 "video_summarizer" => "🤖 **[Auto-Routing: VidIntel (Video Analyst)]**\n\n",
                 "creative" => "🤖 **[Auto-Routing: Muse (Creative)]**\n\n",
                 "helpful" => "🤖 **[Auto-Routing: Serena (Helpful)]**\n\n",
+                "web_scout" => "🤖 **[Auto-Routing: Web Scout (Search)]**\n\n",
+                "code_sandbox" => "🤖 **[Auto-Routing: Code Sandbox]**\n\n",
                 _ => "🤖 **[Auto-Routing: GarionX Core]**\n\n"
             };
             botReplyContent = badge + botReplyContent;
@@ -812,6 +828,22 @@ public class ChatsController : ControllerBase
         
         // Quick local regex classifications to avoid API calls for obvious keywords (highly optimized & instant!)
         string lowerPrompt = userPrompt.ToLower();
+        
+        // Code Sandbox check
+        if (lowerPrompt.Contains("jalankan code") || lowerPrompt.Contains("execute") || lowerPrompt.Contains("sandbox") || 
+            lowerPrompt.Contains("run code") || lowerPrompt.Contains("simulasi code"))
+        {
+            return "code_sandbox";
+        }
+        
+        // Web Scout check
+        if (lowerPrompt.Contains("cari di internet") || lowerPrompt.Contains("search web") || lowerPrompt.Contains("berita terbaru") || 
+            lowerPrompt.Contains("info terbaru") || lowerPrompt.Contains("cuaca") || lowerPrompt.Contains("realtime") || 
+            lowerPrompt.Contains("real-time"))
+        {
+            return "web_scout";
+        }
+
         if (lowerPrompt.Contains("code") || lowerPrompt.Contains("python") || lowerPrompt.Contains("javascript") || 
             lowerPrompt.Contains("css") || lowerPrompt.Contains("html") || lowerPrompt.Contains("c#") || 
             lowerPrompt.Contains("java") || lowerPrompt.Contains("program") || lowerPrompt.Contains("syntax") ||
@@ -869,6 +901,8 @@ public class ChatsController : ControllerBase
 - video_summarizer (for summarizing/analyzing video files)
 - creative (for poetry, stories, creative writing, copy editing)
 - helpful (for step-by-step task planning, brainstorming, friendly assistant)
+- web_scout (for searching current news, weather, real-time info, or query requesting web search)
+- code_sandbox (for executing or sandbox-simulating javascript/python code blocks)
 - garionx (for general chat, greetings, or fallback)
 
 Respond with ONLY the lowercase string ID from the list above, with no markdown, no punctuation, and no explanation. Example: coder" },
@@ -894,7 +928,7 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                     if (choices.GetArrayLength() > 0)
                     {
                         var classification = choices[0].GetProperty("message").GetProperty("content").GetString()?.Trim().ToLower();
-                        var validIds = new[] { "coder", "image_generator", "video_summarizer", "creative", "helpful", "garionx" };
+                        var validIds = new[] { "coder", "image_generator", "video_summarizer", "creative", "helpful", "garionx", "web_scout", "code_sandbox" };
                         if (validIds.Contains(classification))
                         {
                             return classification!;
@@ -909,5 +943,78 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
         }
 
         return defaultPersonality;
+    }
+
+    private async Task<string> SearchWebAsync(string query)
+    {
+        try
+        {
+            using var client = new HttpClient();
+            // Set User-Agent to mimic a real browser to avoid being blocked
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
+            
+            var url = $"https://html.duckduckgo.com/html/?q={Uri.EscapeDataString(query)}";
+            var response = await client.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                return $"[Error: Web search failed with status code {response.StatusCode}]";
+            }
+
+            var html = await response.Content.ReadAsStringAsync();
+            
+            var titleRegex = new Regex(@"<a\s+class=""result__a""\s+href=""(?<url>[^""]+)""[^>]*>(?<title>.*?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+            var snippetRegex = new Regex(@"<a\s+class=""result__snippet""[^>]*>(?<snippet>.*?)</a>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+
+            var titles = titleRegex.Matches(html);
+            var snippets = snippetRegex.Matches(html);
+
+            var sb = new StringBuilder();
+            sb.AppendLine("SEARCH RESULTS:");
+            
+            int count = Math.Min(titles.Count, Math.Min(snippets.Count, 3)); // top 3 results
+            if (count == 0)
+            {
+                return "No recent search results found.";
+            }
+
+            for (int i = 0; i < count; i++)
+            {
+                var title = StripHtmlTags(titles[i].Groups["title"].Value).Trim();
+                var rawUrl = titles[i].Groups["url"].Value;
+                var snippet = StripHtmlTags(snippets[i].Groups["snippet"].Value).Trim();
+
+                // Decode DuckDuckGo redirects if present
+                string cleanUrl = rawUrl;
+                if (rawUrl.Contains("uddg="))
+                {
+                    try
+                    {
+                        var parts = rawUrl.Split("uddg=");
+                        if (parts.Length > 1)
+                        {
+                            var encUrl = parts[1].Split('&')[0];
+                            cleanUrl = Uri.UnescapeDataString(encUrl);
+                        }
+                    }
+                    catch {}
+                }
+
+                sb.AppendLine($"[{i + 1}] Title: {title}");
+                sb.AppendLine($"    URL: {cleanUrl}");
+                sb.AppendLine($"    Snippet: {snippet}");
+                sb.AppendLine();
+            }
+
+            return sb.ToString();
+        }
+        catch (Exception ex)
+        {
+            return $"[Error: Exception during web search: {ex.Message}]";
+        }
+    }
+
+    private string StripHtmlTags(string input)
+    {
+        return Regex.Replace(input, "<.*?>", string.Empty);
     }
 }

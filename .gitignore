@@ -8,7 +8,8 @@ obj/
 .vs/
 
 # Uploads & temporary testing files
-wwwroot/uploads/
+wwwroot/uploads/*
+!wwwroot/uploads/.gitkeep
 
 # Sensitive files
 .env

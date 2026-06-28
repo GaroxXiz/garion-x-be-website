@@ -24,6 +24,8 @@ public class PersonalitiesController : ControllerBase
         var personalities = await _chatRepository.GetPersonalitiesAsync();
         var dtos = personalities
             .Where(p => p.Id != "video_generator") // Temporary maintenance filter
+            .OrderBy(p => p.Id == "garionx" ? 0 : 1)
+            .ThenBy(p => p.Name)
             .Select(p => new PersonalityDto
             {
                 Id = p.Id,
