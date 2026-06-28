@@ -454,6 +454,7 @@ public class AuthController : ControllerBase
         catch (Exception ex)
         {
             Console.WriteLine($"[GARIONX SMTP ERROR] Failed to send email to {toEmail}: {ex.Message}");
+            throw; // Rethrow to propagate to the controller
         }
     }
 
@@ -465,6 +466,10 @@ public class AuthController : ControllerBase
             return BadRequest("Email is required.");
         }
 
+        var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
+        var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
+        var isMock = string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass);
+
         // Generate 6 digit OTP
         var random = new Random();
         var otp = random.Next(100000, 999999).ToString();
@@ -473,19 +478,31 @@ public class AuthController : ControllerBase
         // Store OTP
         OtpStore[request.Email.ToLower()] = (otp, expiry);
 
-        // Send OTP via Gmail SMTP
-        SendOtpViaGmail(request.Email, otp);
+        if (isMock)
+        {
+            Console.WriteLine($"[GARIONX OTP] (SIMULATED DEV) Code for {request.Email} is: {otp}");
+            return Ok(new { 
+                message = "OTP simulated in dev console.", 
+                otp = otp, 
+                isMock = true 
+            });
+        }
 
-        var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
-        var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
-        var isMock = string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass);
-
-        // Return it in response only for mock debugging if SMTP is not configured
-        return Ok(new { 
-            message = isMock ? "OTP simulated in dev console." : "OTP sent successfully via Gmail.", 
-            otp = isMock ? otp : null, 
-            isMock 
-        });
+        try
+        {
+            // Send OTP via Gmail SMTP
+            SendOtpViaGmail(request.Email, otp);
+            
+            return Ok(new { 
+                message = "OTP sent successfully via Gmail.", 
+                otp = (string?)null, 
+                isMock = false 
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Gagal mengirim email OTP ke Gmail Anda. Detail Error: {ex.Message}");
+        }
     }
 
     [HttpPost("verify-otp")]
