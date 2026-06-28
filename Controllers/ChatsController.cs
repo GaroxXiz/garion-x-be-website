@@ -277,6 +277,7 @@ public class ChatsController : ControllerBase
         var botReplyContent = await _aiResponseService.GetResponseAsync(chatId, aiPromptContent, chat.PersonalityId, chat.Model);
 
         // Determine if we need to attach the mock animated video or call real Fal.ai API
+        // Determine if we need to attach the mock animated video or call real Replicate API
         string? replyAttachmentUrl = null;
         string? replyAttachmentType = null;
         if (chat.PersonalityId == "video_generator" && userMsg.AttachmentType == "image" && !string.IsNullOrEmpty(userMsg.AttachmentUrl))
@@ -285,9 +286,9 @@ public class ChatsController : ControllerBase
             replyAttachmentUrl = userMsg.AttachmentUrl;
             replyAttachmentType = "video";
 
-            var falApiKey = Environment.GetEnvironmentVariable("FAL_API_KEY");
+            var replicateToken = Environment.GetEnvironmentVariable("REPLICATE_API_KEY");
             string? apiError = null;
-            if (!string.IsNullOrEmpty(falApiKey))
+            if (!string.IsNullOrEmpty(replicateToken))
             {
                 try
                 {
@@ -296,7 +297,7 @@ public class ChatsController : ControllerBase
                     string imageToAnimate = absoluteImageUrl;
                     
                     // Localhost/Internal containers cannot be accessed by public APIs.
-                    // We dynamically upload the local file to a free public temporary host so Fal.ai can access it.
+                    // We dynamically upload the local file to a free public temporary host so Replicate can access it.
                     if (imageToAnimate.Contains("localhost") || imageToAnimate.Contains("127.0.0.1") || imageToAnimate.Contains("::1"))
                     {
                         var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
@@ -322,58 +323,109 @@ public class ChatsController : ControllerBase
                     }
 
                     using var client = new HttpClient();
-                    client.Timeout = TimeSpan.FromSeconds(90); // Luma Ray 2 generation can take up to 90s
-                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Key", falApiKey);
-
-                    // We pass both the prompt (user's text description) and the image URL to Fal.ai
-                    string userPrompt = string.IsNullOrWhiteSpace(userMsg.Content) 
-                        ? "Animate this image with cinematic camera pan and natural motion." 
-                        : userMsg.Content;
+                    client.Timeout = TimeSpan.FromSeconds(120); // Replicate generation can take up to 2 mins
+                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Token", replicateToken);
 
                     var requestBody = new { 
-                        prompt = userPrompt, 
-                        image_url = imageToAnimate 
+                        version = "3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438",
+                        input = new {
+                            input_image = imageToAnimate
+                        }
                     };
                     var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
 
-                    // Using Luma Ray 2 Flash which takes both prompt and image for precise generative animation
-                    var apiResponse = await client.PostAsync("https://fal.run/fal-ai/luma-dream-machine/ray-2-flash/image-to-video", jsonContent);
+                    var apiResponse = await client.PostAsync("https://api.replicate.com/v1/predictions", jsonContent);
                     if (apiResponse.IsSuccessStatusCode)
                     {
                         var responseJson = await apiResponse.Content.ReadAsStringAsync();
                         using var doc = JsonDocument.Parse(responseJson);
-                        if (doc.RootElement.TryGetProperty("video", out var videoProp) && 
-                            videoProp.TryGetProperty("url", out var urlProp))
+                        
+                        if (doc.RootElement.TryGetProperty("urls", out var urlsProp) && 
+                            urlsProp.TryGetProperty("get", out var getUrlProp))
                         {
-                            var generatedVideoUrl = urlProp.GetString();
-                            if (!string.IsNullOrEmpty(generatedVideoUrl))
+                            var getUrl = getUrlProp.GetString();
+                            if (!string.IsNullOrEmpty(getUrl))
                             {
-                                replyAttachmentUrl = generatedVideoUrl;
+                                // Poll the prediction status
+                                string status = "starting";
+                                string? videoUrl = null;
+                                int maxAttempts = 35; // 35 attempts * 2 seconds = 70 seconds max
+                                
+                                for (int attempt = 0; attempt < maxAttempts; attempt++)
+                                {
+                                    await Task.Delay(2000); // wait 2 seconds between checks
+                                    
+                                    var checkResponse = await client.GetAsync(getUrl);
+                                    if (checkResponse.IsSuccessStatusCode)
+                                    {
+                                        var checkJson = await checkResponse.Content.ReadAsStringAsync();
+                                        using var checkDoc = JsonDocument.Parse(checkJson);
+                                        
+                                        if (checkDoc.RootElement.TryGetProperty("status", out var statusProp))
+                                        {
+                                            status = statusProp.GetString() ?? "failed";
+                                            if (status == "succeeded")
+                                            {
+                                                if (checkDoc.RootElement.TryGetProperty("output", out var outputProp))
+                                                {
+                                                    if (outputProp.ValueKind == JsonValueKind.Array && outputProp.GetArrayLength() > 0)
+                                                    {
+                                                        videoUrl = outputProp[0].GetString();
+                                                    }
+                                                    else if (outputProp.ValueKind == JsonValueKind.String)
+                                                    {
+                                                        videoUrl = outputProp.GetString();
+                                                    }
+                                                }
+                                                break;
+                                            }
+                                            else if (status == "failed" || status == "canceled")
+                                            {
+                                                apiError = $"Replicate prediction status ended with: {status}";
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    else
+                                    {
+                                        apiError = $"Replicate status check failed with: {checkResponse.StatusCode}";
+                                        break;
+                                    }
+                                }
+
+                                if (!string.IsNullOrEmpty(videoUrl))
+                                {
+                                    replyAttachmentUrl = videoUrl;
+                                }
+                                else if (string.IsNullOrEmpty(apiError))
+                                {
+                                    apiError = $"Replicate prediction timed out (final status: {status})";
+                                }
                             }
                         }
                     }
                     else
                     {
                         var err = await apiResponse.Content.ReadAsStringAsync();
-                        Console.WriteLine($"[Fal.ai Video Gen Error]: {err}");
+                        Console.WriteLine($"[Replicate Video Gen Error]: {err}");
                         apiError = $"Status {apiResponse.StatusCode}: {err}";
                     }
                 }
                 catch (Exception ex)
                 {
-                    Console.WriteLine($"[Fal.ai Connection Exception]: {ex.Message}");
+                    Console.WriteLine($"[Replicate Connection Exception]: {ex.Message}");
                     apiError = $"Connection Exception: {ex.Message}";
                 }
             }
             else
             {
-                apiError = "Environment variable FAL_API_KEY is not configured on the server.";
+                apiError = "Environment variable REPLICATE_API_KEY is not configured on the server.";
             }
 
             // Append diagnostics to LLM reply content for visibility
             if (!string.IsNullOrEmpty(apiError))
             {
-                botReplyContent += $"\n\n---\n⚠️ **[Fal.ai Diagnostics]** Mode Simulasi diaktifkan karena:\n`{apiError}`\n\n*Hubungi administrator untuk memasang FAL_API_KEY yang valid.*";
+                botReplyContent += $"\n\n---\n⚠️ **[Replicate Diagnostics]** Mode Simulasi diaktifkan karena:\n`{apiError}`\n\n*Hubungi administrator untuk memasang REPLICATE_API_KEY yang valid.*";
             }
         }
 
