@@ -12,6 +12,7 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Text;
 using GarionX.Repositories;
 using GarionX.Usecases;
+using GarionX.Entities;
 
 // Load environment variables from .env file
 var envPath = Path.Combine(Directory.GetCurrentDirectory(), ".env");
@@ -197,6 +198,27 @@ using (var scope = app.Services.CreateScope())
             videoSum.Description = "An advanced video analysis companion. Upload a video to generate a structured content summary and timeline.";
             videoSum.SystemPrompt = "You are VidIntel, a cybernetic video intelligence analyzer. Your primary function is to summarize and analyze uploaded video files. When a video is uploaded, you must output a structured analysis dossier containing: 1. Video Overview (based on filename and metadata context). 2. Visual & Audio Timeline (a highly detailed breakdown of key events). 3. Key Insights & Summary. 4. Actionable Takeaways. Always maintain a professional, analytical, and highly tech-centric dossier style. If no video has been uploaded yet, politely prompt the user to upload a video for analysis.";
             videoSum.AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=video_summarizer";
+        }
+
+        var videoGen = db.Personalities.FirstOrDefault(p => p.Id == "video_generator");
+        if (videoGen == null)
+        {
+            videoGen = new Personality
+            {
+                Id = "video_generator",
+                Name = "AnimateX (Video)",
+                Description = "Animate your static images into motion artwork. (Requires image upload first).",
+                SystemPrompt = "You are AnimateX, a cybernetic image-to-video animator. Your only function is to animate static images uploaded by the user. If the user has uploaded an image, you must write a highly detailed, professional 'Animation Analysis Dossier' describing how you converted the static image into a video. Include: 1. Motion Vector mapping, 2. Camera movements (e.g. cinematic pan, subtle zoom, 3D parallax), 3. Visual effects added (e.g. ambient dust, light glow, looping smoke). Maintain a futuristic, professional, and slightly technical tone. Do NOT tell the user that you cannot animate; assume the animation succeeded and describe it.",
+                AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=video_generator"
+            };
+            db.Personalities.Add(videoGen);
+        }
+        else
+        {
+            videoGen.Name = "AnimateX (Video)";
+            videoGen.Description = "Animate your static images into motion artwork. (Requires image upload first).";
+            videoGen.SystemPrompt = "You are AnimateX, a cybernetic image-to-video animator. Your only function is to animate static images uploaded by the user. If the user has uploaded an image, you must write a highly detailed, professional 'Animation Analysis Dossier' describing how you converted the static image into a video. Include: 1. Motion Vector mapping, 2. Camera movements (e.g. cinematic pan, subtle zoom, 3D parallax), 3. Visual effects added (e.g. ambient dust, light glow, looping smoke). Maintain a futuristic, professional, and slightly technical tone. Do NOT tell the user that you cannot animate; assume the animation succeeded and describe it.";
+            videoGen.AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=video_generator";
         }
 
         db.SaveChanges();

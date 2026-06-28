@@ -39,6 +39,16 @@ public class AiResponseService : IAiResponseService
 
             var rawHistory = await _chatRepository.GetMessagesAsync(chatId);
             var historyList = rawHistory.ToList();
+
+            // Check if user has uploaded an image (specifically in their latest message)
+            var lastUserMsg = historyList.LastOrDefault(m => m.Sender == "user");
+            bool hasImage = lastUserMsg != null && lastUserMsg.AttachmentType == "image" && !string.IsNullOrEmpty(lastUserMsg.AttachmentUrl);
+
+            if (personalityId == "video_generator" && !hasImage)
+            {
+                return "⚠️ **[AnimateX - Warning]** Anda wajib mengunggah gambar (.png, .jpg, .webp) terlebih dahulu sebelum saya dapat menganimasikannya menjadi video. Silakan klik tombol attachment (paperclip) di bawah atau seret gambar Anda ke kolom input chat untuk mengunggah gambar Anda terlebih dahulu!";
+            }
+
             int lastUserIdx = historyList.FindLastIndex(m => m.Sender == "user");
             
             var history = historyList.Select((msg, idx) =>
@@ -67,8 +77,6 @@ public class AiResponseService : IAiResponseService
 
             if (hasGroqKey)
             {
-                var lastUserMsg = history.LastOrDefault(m => m.Sender == "user");
-                bool hasImage = lastUserMsg != null && lastUserMsg.AttachmentType == "image" && !string.IsNullOrEmpty(lastUserMsg.AttachmentUrl);
 
                 string groqModel = model.ToLower() switch
                 {

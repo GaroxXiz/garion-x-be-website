@@ -273,8 +273,17 @@ public class ChatsController : ControllerBase
         // 4. Generate AI response based on chat's model
         var botReplyContent = await _aiResponseService.GetResponseAsync(chatId, aiPromptContent, chat.PersonalityId, chat.Model);
 
+        // Determine if we need to attach the mock animated video
+        string? replyAttachmentUrl = null;
+        string? replyAttachmentType = null;
+        if (chat.PersonalityId == "video_generator" && userMsg.AttachmentType == "image" && !string.IsNullOrEmpty(userMsg.AttachmentUrl))
+        {
+            replyAttachmentUrl = "https://assets.mixkit.co/videos/preview/mixkit-cyberpunk-neon-city-street-40141-large.mp4";
+            replyAttachmentType = "video";
+        }
+
         // 5. Save AI message
-        var botMsg = await _chatRepository.AddMessageAsync(chatId, "assistant", botReplyContent);
+        var botMsg = await _chatRepository.AddMessageAsync(chatId, "assistant", botReplyContent, replyAttachmentUrl, replyAttachmentType);
 
         var response = new SendMessageResponse
         {
