@@ -277,7 +277,7 @@ public class ChatsController : ControllerBase
         var botReplyContent = await _aiResponseService.GetResponseAsync(chatId, aiPromptContent, chat.PersonalityId, chat.Model);
 
         // Determine if we need to attach the mock animated video or call real Fal.ai API
-        // Determine if we need to attach the mock animated video or call real Replicate API
+        // Determine if we need to attach the mock animated video or call real API
         string? replyAttachmentUrl = null;
         string? replyAttachmentType = null;
         if (chat.PersonalityId == "video_generator" && userMsg.AttachmentType == "image" && !string.IsNullOrEmpty(userMsg.AttachmentUrl))
@@ -286,10 +286,13 @@ public class ChatsController : ControllerBase
             replyAttachmentUrl = userMsg.AttachmentUrl;
             replyAttachmentType = "video";
 
+            var segmindApiKey = Environment.GetEnvironmentVariable("SEGMIND_API_KEY");
             var replicateToken = Environment.GetEnvironmentVariable("REPLICATE_API_KEY");
             string? apiError = null;
-            if (!string.IsNullOrEmpty(replicateToken))
+
+            if (!string.IsNullOrEmpty(segmindApiKey))
             {
+                // Call Segmind SVD API (100 free daily credits!)
                 try
                 {
                     // Construct public image URL.
@@ -297,7 +300,83 @@ public class ChatsController : ControllerBase
                     string imageToAnimate = absoluteImageUrl;
                     
                     // Localhost/Internal containers cannot be accessed by public APIs.
-                    // We dynamically upload the local file to a free public temporary host so Replicate can access it.
+                    if (imageToAnimate.Contains("localhost") || imageToAnimate.Contains("127.0.0.1") || imageToAnimate.Contains("::1"))
+                    {
+                        var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
+                        var fileName = Path.GetFileName(userMsg.AttachmentUrl);
+                        var localFilePath = Path.Combine(uploadsFolder, fileName);
+                        
+                        if (System.IO.File.Exists(localFilePath))
+                        {
+                            var publicUrl = await UploadToPublicHostAsync(localFilePath);
+                            if (!string.IsNullOrEmpty(publicUrl))
+                            {
+                                imageToAnimate = publicUrl;
+                            }
+                        }
+                    }
+
+                    using var client = new HttpClient();
+                    client.Timeout = TimeSpan.FromSeconds(90);
+                    client.DefaultRequestHeaders.Add("x-api-key", segmindApiKey);
+
+                    var requestBody = new { 
+                        image = imageToAnimate,
+                        base64 = false
+                    };
+                    var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+
+                    var apiResponse = await client.PostAsync("https://api.segmind.com/v1/svd", jsonContent);
+                    if (apiResponse.IsSuccessStatusCode)
+                    {
+                        var contentType = apiResponse.Content.Headers.ContentType?.MediaType ?? "";
+                        if (contentType.Contains("json"))
+                        {
+                            var responseJson = await apiResponse.Content.ReadAsStringAsync();
+                            using var doc = JsonDocument.Parse(responseJson);
+                            if (doc.RootElement.TryGetProperty("output", out var outputProp))
+                            {
+                                var outputVal = outputProp.GetString();
+                                if (!string.IsNullOrEmpty(outputVal))
+                                {
+                                    replyAttachmentUrl = outputVal;
+                                }
+                            }
+                        }
+                        else
+                        {
+                            // It returned the raw video bytes directly
+                            var videoBytes = await apiResponse.Content.ReadAsByteArrayAsync();
+                            var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
+                            var uniqueVideoName = $"{Guid.NewGuid()}.mp4";
+                            var videoPath = Path.Combine(uploadsFolder, uniqueVideoName);
+                            
+                            await System.IO.File.WriteAllBytesAsync(videoPath, videoBytes);
+                            replyAttachmentUrl = $"/uploads/{uniqueVideoName}";
+                        }
+                    }
+                    else
+                    {
+                        var err = await apiResponse.Content.ReadAsStringAsync();
+                        Console.WriteLine($"[Segmind Video Gen Error]: {err}");
+                        apiError = $"Segmind Status {apiResponse.StatusCode}: {err}";
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Segmind Connection Exception]: {ex.Message}");
+                    apiError = $"Segmind Exception: {ex.Message}";
+                }
+            }
+            else if (!string.IsNullOrEmpty(replicateToken))
+            {
+                // Call Replicate SVD API
+                try
+                {
+                    // Construct public image URL.
+                    var absoluteImageUrl = $"{Request.Scheme}://{Request.Host}{userMsg.AttachmentUrl}";
+                    string imageToAnimate = absoluteImageUrl;
+                    
                     if (imageToAnimate.Contains("localhost") || imageToAnimate.Contains("127.0.0.1") || imageToAnimate.Contains("::1"))
                     {
                         var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
@@ -419,13 +498,13 @@ public class ChatsController : ControllerBase
             }
             else
             {
-                apiError = "Environment variable REPLICATE_API_KEY is not configured on the server.";
+                apiError = "Environment variable SEGMIND_API_KEY or REPLICATE_API_KEY is not configured on the server.";
             }
 
             // Append diagnostics to LLM reply content for visibility
             if (!string.IsNullOrEmpty(apiError))
             {
-                botReplyContent += $"\n\n---\n⚠️ **[Replicate Diagnostics]** Mode Simulasi diaktifkan karena:\n`{apiError}`\n\n*Hubungi administrator untuk memasang REPLICATE_API_KEY yang valid.*";
+                botReplyContent += $"\n\n---\n⚠️ **[Video Generator Diagnostics]** Mode Simulasi diaktifkan karena:\n`{apiError}`\n\n*Hubungi administrator untuk memasang SEGMIND_API_KEY (gratis 100x sehari) atau REPLICATE_API_KEY.*";
             }
         }
 

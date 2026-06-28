@@ -37,10 +37,12 @@ public class AiResponseService : IAiResponseService
             // Global instruction for multilingual / auto-translate support
             systemPrompt += "\n\n[System Instruction: You must respond in the same language as the user's message. If the user writes in Indonesian, respond in Indonesian. If they write in English, Spanish, Japanese, French, or any other language, automatically adapt and respond in that exact language while preserving your assigned personality, tone, and character.]";
 
-            // If it's video generator and REPLICATE_API_KEY is missing, instruct the AI to show a notice on how to activate real generation
-            if (personalityId == "video_generator" && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("REPLICATE_API_KEY")))
+            // If it's video generator and API keys are missing, instruct the AI to show a notice on how to activate real generation
+            if (personalityId == "video_generator" && 
+                string.IsNullOrEmpty(Environment.GetEnvironmentVariable("SEGMIND_API_KEY")) && 
+                string.IsNullOrEmpty(Environment.GetEnvironmentVariable("REPLICATE_API_KEY")))
             {
-                systemPrompt += "\n\n[System Notice: The generative AI video engine is currently running in 'Frontend Cinematic Parallax Simulation' mode because the REPLICATE_API_KEY environment variable is not configured. Append a brief, helpful and stylish siber-note at the end of your response to tell the user that they can configure REPLICATE_API_KEY in Hugging Face Space settings or .env to unlock true generative AI MP4 video files.]";
+                systemPrompt += "\n\n[System Notice: The generative AI video engine is currently running in 'Frontend Cinematic Parallax Simulation' mode because the SEGMIND_API_KEY and REPLICATE_API_KEY environment variables are not configured. Append a brief, helpful and stylish siber-note at the end of your response to tell the user that they can configure SEGMIND_API_KEY (100 free credits daily) in Hugging Face Space settings or .env to unlock true generative AI MP4 video files.]";
             }
 
             var rawHistory = await _chatRepository.GetMessagesAsync(chatId);
