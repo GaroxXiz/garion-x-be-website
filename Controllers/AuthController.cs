@@ -405,6 +405,54 @@ public class AuthController : ControllerBase
 
     private static readonly Dictionary<string, (string Otp, DateTime Expiry)> OtpStore = new();
 
+    private static void SendOtpViaGmail(string toEmail, string otp)
+    {
+        var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
+        var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
+
+        if (string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass))
+        {
+            Console.WriteLine($"[GARIONX SMTP WARNING] SMTP_USER or SMTP_PASS not set. Falling back to console only. OTP for {toEmail} is: {otp}");
+            return;
+        }
+
+        try
+        {
+            using var client = new System.Net.Mail.SmtpClient("smtp.gmail.com", 587)
+            {
+                Credentials = new System.Net.NetworkCredential(smtpUser, smtpPass),
+                EnableSsl = true
+            };
+
+            var mailMessage = new System.Net.Mail.MailMessage
+            {
+                From = new System.Net.Mail.MailAddress(smtpUser, "Garion-X Terminal Services"),
+                Subject = "🔑 Garion-X Terminal OTP Security Code",
+                Body = $@"
+<div style=""font-family: monospace; background-color: #0d0e15; color: #e2e8f0; padding: 30px; border: 1px solid #1e293b; border-radius: 8px; max-width: 500px; margin: auto;"">
+    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">Garion-X Terminal Auth</h2>
+    <hr style=""border-color: #334155; margin: 20px 0;"" />
+    <p>System requested a security code for your session.</p>
+    <p>Please enter the following 6-digit OTP code to complete authorization:</p>
+    <div style=""background: rgba(0, 255, 204, 0.05); border: 1px dashed #00ffcc; padding: 15px; border-radius: 6px; text-align: center; margin: 25px 0;"">
+        <span style=""font-size: 2.2rem; font-weight: bold; color: #00ffcc; letter-spacing: 8px; font-family: monospace;"">{otp}</span>
+    </div>
+    <p style=""font-size: 0.8rem; color: #64748b; text-align: center;"">This security code is strictly confidential and will expire in <strong>5 minutes</strong>.</p>
+    <p style=""font-size: 0.8rem; color: #64748b; text-align: center;"">If you did not request this code, please ignore this email.</p>
+</div>",
+                IsBodyHtml = true
+            };
+
+            mailMessage.To.Add(toEmail);
+            client.Send(mailMessage);
+            Console.WriteLine($"[GARIONX SMTP] OTP email sent successfully to {toEmail}");
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GARIONX SMTP ERROR] Failed to send email to {toEmail}: {ex.Message}");
+        }
+    }
+
     [HttpPost("send-otp")]
     public IActionResult SendOtp([FromBody] SendOtpRequest request)
     {
@@ -421,11 +469,19 @@ public class AuthController : ControllerBase
         // Store OTP
         OtpStore[request.Email.ToLower()] = (otp, expiry);
 
-        // Log OTP to console (so developer/admin can see it in terminal logs)
-        Console.WriteLine($"[GARIONX OTP] Code for {request.Email} is: {otp}");
+        // Send OTP via Gmail SMTP
+        SendOtpViaGmail(request.Email, otp);
 
-        // Return it in response for debugging/mock presentation purposes
-        return Ok(new { message = "OTP sent successfully to email.", otp = otp });
+        var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
+        var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
+        var isMock = string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass);
+
+        // Return it in response only for mock debugging if SMTP is not configured
+        return Ok(new { 
+            message = isMock ? "OTP simulated in dev console." : "OTP sent successfully via Gmail.", 
+            otp = isMock ? otp : null, 
+            isMock 
+        });
     }
 
     [HttpPost("verify-otp")]
