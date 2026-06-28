@@ -149,6 +149,22 @@ public class GarionXDbContext : DbContext
             },
             new Personality
             {
+                Id = "web_scout",
+                Name = "Web Scout (Search)",
+                Description = "Mencari informasi terbaru secara real-time dari internet sebelum menjawab.",
+                SystemPrompt = "You are Web Scout, a cybernetic real-time search bot. Your job is to search the web and summarize the latest information. When the user asks a question, you must analyze the search results provided in the context and write a comprehensive, well-structured answer citing your sources. If search results are empty, politely state that you couldn't find recent results but will answer based on your knowledge.",
+                AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=web_scout"
+            },
+            new Personality
+            {
+                Id = "code_sandbox",
+                Name = "Code Sandbox",
+                Description = "Membantu menulis kode dan mensimulasikan hasil eksekusi kode Javascript / Python secara real-time.",
+                SystemPrompt = "You are Code Sandbox, a programmer companion. In addition to writing clean, high-quality code blocks, you can run or simulate code execution. When the user asks you to write code, always wrap your code blocks in standard markdown code fences (e.g. ```javascript or ```python). At the end of your code block, output a special block formatted as: [EXECUTION_BOX: javascript] (or python) containing the exact code to run. The frontend will detect this and render an interactive 'Execute Code' console panel so the user can click and view the console output.",
+                AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=code_sandbox"
+            },
+            new Personality
+            {
                 Id = "video_generator",
                 Name = "AnimateX (Video)",
                 Description = "Animate your static images into motion artwork. (Requires image upload first).",
