@@ -278,7 +278,7 @@ public class ChatsController : ControllerBase
         string? replyAttachmentType = null;
         if (chat.PersonalityId == "video_generator" && userMsg.AttachmentType == "image" && !string.IsNullOrEmpty(userMsg.AttachmentUrl))
         {
-            replyAttachmentUrl = "https://www.w3schools.com/html/mov_bbb.mp4";
+            replyAttachmentUrl = userMsg.AttachmentUrl;
             replyAttachmentType = "video";
         }
 
