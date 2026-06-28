@@ -286,6 +286,7 @@ public class ChatsController : ControllerBase
             replyAttachmentType = "video";
 
             var falApiKey = Environment.GetEnvironmentVariable("FAL_API_KEY");
+            string? apiError = null;
             if (!string.IsNullOrEmpty(falApiKey))
             {
                 try
@@ -335,12 +336,24 @@ public class ChatsController : ControllerBase
                     {
                         var err = await apiResponse.Content.ReadAsStringAsync();
                         Console.WriteLine($"[Fal.ai Video Gen Error]: {err}");
+                        apiError = $"Status {apiResponse.StatusCode}: {err}";
                     }
                 }
                 catch (Exception ex)
                 {
                     Console.WriteLine($"[Fal.ai Connection Exception]: {ex.Message}");
+                    apiError = $"Connection Exception: {ex.Message}";
                 }
+            }
+            else
+            {
+                apiError = "Environment variable FAL_API_KEY is not configured on the server.";
+            }
+
+            // Append diagnostics to LLM reply content for visibility
+            if (!string.IsNullOrEmpty(apiError))
+            {
+                botReplyContent += $"\n\n---\n⚠️ **[Fal.ai Diagnostics]** Mode Simulasi diaktifkan karena:\n`{apiError}`\n\n*Hubungi administrator untuk memasang FAL_API_KEY yang valid.*";
             }
         }
 
