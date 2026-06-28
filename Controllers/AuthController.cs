@@ -424,7 +424,8 @@ public class AuthController : ControllerBase
             using var client = new System.Net.Mail.SmtpClient(smtpHost, smtpPort)
             {
                 Credentials = new System.Net.NetworkCredential(smtpUser, smtpPass),
-                EnableSsl = true
+                EnableSsl = true,
+                Timeout = 5000
             };
 
             var mailMessage = new System.Net.Mail.MailMessage
