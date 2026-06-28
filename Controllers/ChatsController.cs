@@ -295,10 +295,30 @@ public class ChatsController : ControllerBase
                     var absoluteImageUrl = $"{Request.Scheme}://{Request.Host}{userMsg.AttachmentUrl}";
                     string imageToAnimate = absoluteImageUrl;
                     
-                    // Localhost cannot be accessed by public APIs. Fallback to a high-quality visual for local testing.
-                    if (imageToAnimate.Contains("localhost") || imageToAnimate.Contains("127.0.0.1"))
+                    // Localhost/Internal containers cannot be accessed by public APIs.
+                    // We dynamically upload the local file to a free public temporary host so Fal.ai can access it.
+                    if (imageToAnimate.Contains("localhost") || imageToAnimate.Contains("127.0.0.1") || imageToAnimate.Contains("::1"))
                     {
-                        imageToAnimate = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000";
+                        var uploadsFolder = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", "uploads");
+                        var fileName = Path.GetFileName(userMsg.AttachmentUrl);
+                        var localFilePath = Path.Combine(uploadsFolder, fileName);
+                        
+                        if (System.IO.File.Exists(localFilePath))
+                        {
+                            var publicUrl = await UploadToPublicHostAsync(localFilePath);
+                            if (!string.IsNullOrEmpty(publicUrl))
+                            {
+                                imageToAnimate = publicUrl;
+                            }
+                            else
+                            {
+                                imageToAnimate = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000";
+                            }
+                        }
+                        else
+                        {
+                            imageToAnimate = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000";
+                        }
                     }
 
                     using var client = new HttpClient();
@@ -589,5 +609,40 @@ public class ChatsController : ControllerBase
             Console.WriteLine($"[YoutubeExplode Error] Failed to fetch transcript for {videoUrlOrId}: {ex.Message}");
             return $"[Error retrieving transcript: {ex.Message}]";
         }
+    }
+
+    private async Task<string?> UploadToPublicHostAsync(string localPath)
+    {
+        try
+        {
+            using var client = new HttpClient();
+            using var form = new MultipartFormDataContent();
+            using var fileStream = new FileStream(localPath, FileMode.Open, FileAccess.Read);
+            using var streamContent = new StreamContent(fileStream);
+            
+            streamContent.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue("image/png");
+            form.Add(streamContent, "file", Path.GetFileName(localPath));
+
+            var response = await client.PostAsync("https://tmpfiles.org/api/v1/upload", form);
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(json);
+                if (doc.RootElement.TryGetProperty("data", out var dataProp) && 
+                    dataProp.TryGetProperty("url", out var urlProp))
+                {
+                    var tmpUrl = urlProp.GetString();
+                    if (!string.IsNullOrEmpty(tmpUrl))
+                    {
+                        return tmpUrl.Replace("https://tmpfiles.org/", "https://tmpfiles.org/dl/");
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Public Host Upload Exception]: {ex.Message}");
+        }
+        return null;
     }
 }
