@@ -465,7 +465,7 @@ public class AuthController : ControllerBase
                 Username = uniqueUsername,
                 PasswordHash = HashPassword(Guid.NewGuid().ToString()), // Random hash for passwordless
                 Email = request.Email,
-                Name = username,
+                Name = string.IsNullOrWhiteSpace(request.Name) ? username : request.Name,
                 AvatarUrl = $"https://api.dicebear.com/7.x/bottts/svg?seed={Uri.EscapeDataString(uniqueUsername)}"
             };
             user = await _chatRepository.RegisterUserAsync(user);
