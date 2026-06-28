@@ -22,14 +22,16 @@ public class PersonalitiesController : ControllerBase
     public async Task<ActionResult<IEnumerable<PersonalityDto>>> GetPersonalities()
     {
         var personalities = await _chatRepository.GetPersonalitiesAsync();
-        var dtos = personalities.Select(p => new PersonalityDto
-        {
-            Id = p.Id,
-            Name = p.Name,
-            Description = p.Description,
-            SystemPrompt = p.SystemPrompt,
-            AvatarUrl = p.AvatarUrl
-        });
+        var dtos = personalities
+            .Where(p => p.Id != "video_generator") // Temporary maintenance filter
+            .Select(p => new PersonalityDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                Description = p.Description,
+                SystemPrompt = p.SystemPrompt,
+                AvatarUrl = p.AvatarUrl
+            });
 
         return Ok(dtos);
     }

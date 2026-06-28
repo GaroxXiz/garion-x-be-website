@@ -830,13 +830,13 @@ public class ChatsController : ControllerBase
             lowerPrompt.Contains("buat video") || lowerPrompt.Contains("gif") || lowerPrompt.Contains("motion"))
         {
             // If it's about analyzing/summarizing video content, route to video_summarizer. 
-            // Otherwise, if they want to make/generate/animate a video, route to video_generator.
+            // We DO NOT route to video_generator because it is under maintenance.
             if (lowerPrompt.Contains("summarize") || lowerPrompt.Contains("ringkas") || lowerPrompt.Contains("analisis") || 
                 lowerPrompt.Contains("analize") || lowerPrompt.Contains("isi video"))
             {
                 return "video_summarizer"; // VidIntel
             }
-            return "video_generator"; // AnimateX
+            return "garionx"; // Fallback to GarionX Core (AnimateX is under maintenance)
         }
         if (lowerPrompt.Contains("puisi") || lowerPrompt.Contains("cerita") || lowerPrompt.Contains("novel") || 
             lowerPrompt.Contains("story") || lowerPrompt.Contains("dongeng") || lowerPrompt.Contains("pantun") ||
@@ -866,7 +866,6 @@ public class ChatsController : ControllerBase
                     new { role = "system", content = @"You are a prompt router. Classify the user prompt and respond with EXACTLY one of these personality IDs:
 - coder (for programming, algorithms, code blocks, or debug issues)
 - image_generator (for drawing, painting, or generating images)
-- video_generator (for creating/animating videos from pictures)
 - video_summarizer (for summarizing/analyzing video files)
 - creative (for poetry, stories, creative writing, copy editing)
 - helpful (for step-by-step task planning, brainstorming, friendly assistant)
@@ -895,7 +894,7 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                     if (choices.GetArrayLength() > 0)
                     {
                         var classification = choices[0].GetProperty("message").GetProperty("content").GetString()?.Trim().ToLower();
-                        var validIds = new[] { "coder", "image_generator", "video_generator", "video_summarizer", "creative", "helpful", "garionx" };
+                        var validIds = new[] { "coder", "image_generator", "video_summarizer", "creative", "helpful", "garionx" };
                         if (validIds.Contains(classification))
                         {
                             return classification!;
