@@ -301,13 +301,22 @@ public class ChatsController : ControllerBase
                     }
 
                     using var client = new HttpClient();
-                    client.Timeout = TimeSpan.FromSeconds(60);
+                    client.Timeout = TimeSpan.FromSeconds(90); // Luma Ray 2 generation can take up to 90s
                     client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Key", falApiKey);
 
-                    var requestBody = new { image_url = imageToAnimate };
+                    // We pass both the prompt (user's text description) and the image URL to Fal.ai
+                    string userPrompt = string.IsNullOrWhiteSpace(userMsg.Content) 
+                        ? "Animate this image with cinematic camera pan and natural motion." 
+                        : userMsg.Content;
+
+                    var requestBody = new { 
+                        prompt = userPrompt, 
+                        image_url = imageToAnimate 
+                    };
                     var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
 
-                    var apiResponse = await client.PostAsync("https://fal.run/fal-ai/stable-video-diffusion", jsonContent);
+                    // Using Luma Ray 2 Flash which takes both prompt and image for precise generative animation
+                    var apiResponse = await client.PostAsync("https://fal.run/fal-ai/luma-dream-machine/ray-2-flash/image-to-video", jsonContent);
                     if (apiResponse.IsSuccessStatusCode)
                     {
                         var responseJson = await apiResponse.Content.ReadAsStringAsync();
