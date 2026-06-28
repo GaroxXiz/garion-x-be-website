@@ -245,9 +245,18 @@ public class ChatsController : ControllerBase
             await _chatRepository.UpdateChatTitleAsync(chatId, truncatedTitle);
         }
 
+        // Determine active personality (handle auto routing)
+        string activePersonalityId = chat.PersonalityId;
+        bool isAutoRouted = false;
+        if (chat.PersonalityId == "auto")
+        {
+            activePersonalityId = await ClassifyPersonalityAsync(request.Content);
+            isAutoRouted = true;
+        }
+
         // 3. Enrich context for AI video summarization
         string aiPromptContent = request.Content;
-        if (chat.PersonalityId == "video_summarizer" && attachmentType == "video")
+        if (activePersonalityId == "video_summarizer" && attachmentType == "video")
         {
             if (hasVideoUrl)
             {
@@ -274,13 +283,28 @@ public class ChatsController : ControllerBase
         }
 
         // 4. Generate AI response based on chat's model
-        var botReplyContent = await _aiResponseService.GetResponseAsync(chatId, aiPromptContent, chat.PersonalityId, chat.Model);
+        var botReplyContent = await _aiResponseService.GetResponseAsync(chatId, aiPromptContent, activePersonalityId, chat.Model);
+
+        if (isAutoRouted)
+        {
+            string badge = activePersonalityId switch
+            {
+                "coder" => "🤖 **[Auto-Routing: SyntaxVortex (Coder)]**\n\n",
+                "image_generator" => "🤖 **[Auto-Routing: Synthetix (Image)]**\n\n",
+                "video_generator" => "🤖 **[Auto-Routing: AnimateX (Video)]**\n\n",
+                "video_summarizer" => "🤖 **[Auto-Routing: VidIntel (Video Analyst)]**\n\n",
+                "creative" => "🤖 **[Auto-Routing: Muse (Creative)]**\n\n",
+                "helpful" => "🤖 **[Auto-Routing: Serena (Helpful)]**\n\n",
+                _ => "🤖 **[Auto-Routing: GarionX Core]**\n\n"
+            };
+            botReplyContent = badge + botReplyContent;
+        }
 
         // Determine if we need to attach the mock animated video or call real Fal.ai API
         // Determine if we need to attach the mock animated video or call real API
         string? replyAttachmentUrl = null;
         string? replyAttachmentType = null;
-        if (chat.PersonalityId == "video_generator" && userMsg.AttachmentType == "image" && !string.IsNullOrEmpty(userMsg.AttachmentUrl))
+        if (activePersonalityId == "video_generator" && userMsg.AttachmentType == "image" && !string.IsNullOrEmpty(userMsg.AttachmentUrl))
         {
             // Default to local fallback simulation
             replyAttachmentUrl = userMsg.AttachmentUrl;
@@ -775,5 +799,112 @@ public class ChatsController : ControllerBase
             Console.WriteLine($"[Public Host Upload Exception]: {ex.Message}");
         }
         return null;
+    }
+
+    private async Task<string> ClassifyPersonalityAsync(string userPrompt)
+    {
+        // Default fallback is the default bot
+        string defaultPersonality = "garionx";
+        
+        // Quick local regex classifications to avoid API calls for obvious keywords (highly optimized & instant!)
+        string lowerPrompt = userPrompt.ToLower();
+        if (lowerPrompt.Contains("code") || lowerPrompt.Contains("python") || lowerPrompt.Contains("javascript") || 
+            lowerPrompt.Contains("css") || lowerPrompt.Contains("html") || lowerPrompt.Contains("c#") || 
+            lowerPrompt.Contains("java") || lowerPrompt.Contains("program") || lowerPrompt.Contains("syntax") ||
+            lowerPrompt.Contains("function") || lowerPrompt.Contains("bug") || lowerPrompt.Contains("debug") ||
+            lowerPrompt.Contains("error in line") || lowerPrompt.Contains("database") || lowerPrompt.Contains("query"))
+        {
+            return "coder"; // SyntaxVortex
+        }
+        if (lowerPrompt.Contains("gambar") || lowerPrompt.Contains("lukisan") || lowerPrompt.Contains("draw") || 
+            lowerPrompt.Contains("paint") || lowerPrompt.Contains("ilustrasi") || lowerPrompt.Contains("foto") ||
+            lowerPrompt.Contains("generate image") || lowerPrompt.Contains("synthetix") || lowerPrompt.Contains("wallpaper"))
+        {
+            return "image_generator"; // Synthetix
+        }
+        if (lowerPrompt.Contains("video") || lowerPrompt.Contains("animasi") || lowerPrompt.Contains("animate") || 
+            lowerPrompt.Contains("buat video") || lowerPrompt.Contains("gif") || lowerPrompt.Contains("motion"))
+        {
+            // If it's about analyzing/summarizing video content, route to video_summarizer. 
+            // Otherwise, if they want to make/generate/animate a video, route to video_generator.
+            if (lowerPrompt.Contains("summarize") || lowerPrompt.Contains("ringkas") || lowerPrompt.Contains("analisis") || 
+                lowerPrompt.Contains("analize") || lowerPrompt.Contains("isi video"))
+            {
+                return "video_summarizer"; // VidIntel
+            }
+            return "video_generator"; // AnimateX
+        }
+        if (lowerPrompt.Contains("puisi") || lowerPrompt.Contains("cerita") || lowerPrompt.Contains("novel") || 
+            lowerPrompt.Contains("story") || lowerPrompt.Contains("dongeng") || lowerPrompt.Contains("pantun") ||
+            lowerPrompt.Contains("menulis") || lowerPrompt.Contains("creative") || lowerPrompt.Contains("analogi"))
+        {
+            return "creative"; // Muse
+        }
+        if (lowerPrompt.Contains("bantu") || lowerPrompt.Contains("help") || lowerPrompt.Contains("plan") || 
+            lowerPrompt.Contains("rencana") || lowerPrompt.Contains("jadwal") || lowerPrompt.Contains("tips") ||
+            lowerPrompt.Contains("saran") || lowerPrompt.Contains("brainstorm"))
+        {
+            return "helpful"; // Serena
+        }
+
+        // If no keyword matches, use a quick LLM classification call!
+        var groqApiKey = Environment.GetEnvironmentVariable("GROQ_API_KEY");
+        if (!string.IsNullOrEmpty(groqApiKey) && groqApiKey != "your_groq_api_key_here")
+        {
+            try
+            {
+                using var client = new HttpClient();
+                client.Timeout = TimeSpan.FromSeconds(5); // super short timeout for fast routing
+                client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", groqApiKey);
+
+                var messages = new[]
+                {
+                    new { role = "system", content = @"You are a prompt router. Classify the user prompt and respond with EXACTLY one of these personality IDs:
+- coder (for programming, algorithms, code blocks, or debug issues)
+- image_generator (for drawing, painting, or generating images)
+- video_generator (for creating/animating videos from pictures)
+- video_summarizer (for summarizing/analyzing video files)
+- creative (for poetry, stories, creative writing, copy editing)
+- helpful (for step-by-step task planning, brainstorming, friendly assistant)
+- garionx (for general chat, greetings, or fallback)
+
+Respond with ONLY the lowercase string ID from the list above, with no markdown, no punctuation, and no explanation. Example: coder" },
+                    new { role = "user", content = userPrompt }
+                };
+
+                var requestBody = new
+                {
+                    model = "llama-3.3-70b-versatile",
+                    messages = messages,
+                    temperature = 0.0,
+                    max_tokens = 10
+                };
+
+                var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+                var response = await client.PostAsync("https://api.groq.com/openai/v1/chat/completions", jsonContent);
+
+                if (response.IsSuccessStatusCode)
+                {
+                    var responseJson = await response.Content.ReadAsStringAsync();
+                    using var doc = JsonDocument.Parse(responseJson);
+                    var choices = doc.RootElement.GetProperty("choices");
+                    if (choices.GetArrayLength() > 0)
+                    {
+                        var classification = choices[0].GetProperty("message").GetProperty("content").GetString()?.Trim().ToLower();
+                        var validIds = new[] { "coder", "image_generator", "video_generator", "video_summarizer", "creative", "helpful", "garionx" };
+                        if (validIds.Contains(classification))
+                        {
+                            return classification!;
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[Auto Routing LLM Error]: {ex.Message}");
+            }
+        }
+
+        return defaultPersonality;
     }
 }
