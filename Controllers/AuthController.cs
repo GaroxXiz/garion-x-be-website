@@ -409,6 +409,9 @@ public class AuthController : ControllerBase
     {
         var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
         var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
+        var smtpHost = Environment.GetEnvironmentVariable("SMTP_HOST") ?? "smtp.gmail.com";
+        var smtpPortStr = Environment.GetEnvironmentVariable("SMTP_PORT");
+        int smtpPort = int.TryParse(smtpPortStr, out var port) ? port : 587;
 
         if (string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass))
         {
@@ -418,7 +421,7 @@ public class AuthController : ControllerBase
 
         try
         {
-            using var client = new System.Net.Mail.SmtpClient("smtp.gmail.com", 587)
+            using var client = new System.Net.Mail.SmtpClient(smtpHost, smtpPort)
             {
                 Credentials = new System.Net.NetworkCredential(smtpUser, smtpPass),
                 EnableSsl = true
