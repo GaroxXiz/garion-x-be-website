@@ -4,6 +4,9 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -273,13 +276,63 @@ public class ChatsController : ControllerBase
         // 4. Generate AI response based on chat's model
         var botReplyContent = await _aiResponseService.GetResponseAsync(chatId, aiPromptContent, chat.PersonalityId, chat.Model);
 
-        // Determine if we need to attach the mock animated video
+        // Determine if we need to attach the mock animated video or call real Fal.ai API
         string? replyAttachmentUrl = null;
         string? replyAttachmentType = null;
         if (chat.PersonalityId == "video_generator" && userMsg.AttachmentType == "image" && !string.IsNullOrEmpty(userMsg.AttachmentUrl))
         {
+            // Default to local fallback simulation
             replyAttachmentUrl = userMsg.AttachmentUrl;
             replyAttachmentType = "video";
+
+            var falApiKey = Environment.GetEnvironmentVariable("FAL_API_KEY");
+            if (!string.IsNullOrEmpty(falApiKey))
+            {
+                try
+                {
+                    // Construct public image URL.
+                    var absoluteImageUrl = $"{Request.Scheme}://{Request.Host}{userMsg.AttachmentUrl}";
+                    string imageToAnimate = absoluteImageUrl;
+                    
+                    // Localhost cannot be accessed by public APIs. Fallback to a high-quality visual for local testing.
+                    if (imageToAnimate.Contains("localhost") || imageToAnimate.Contains("127.0.0.1"))
+                    {
+                        imageToAnimate = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1000";
+                    }
+
+                    using var client = new HttpClient();
+                    client.Timeout = TimeSpan.FromSeconds(60);
+                    client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Key", falApiKey);
+
+                    var requestBody = new { image_url = imageToAnimate };
+                    var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+
+                    var apiResponse = await client.PostAsync("https://fal.run/fal-ai/stable-video-diffusion", jsonContent);
+                    if (apiResponse.IsSuccessStatusCode)
+                    {
+                        var responseJson = await apiResponse.Content.ReadAsStringAsync();
+                        using var doc = JsonDocument.Parse(responseJson);
+                        if (doc.RootElement.TryGetProperty("video", out var videoProp) && 
+                            videoProp.TryGetProperty("url", out var urlProp))
+                        {
+                            var generatedVideoUrl = urlProp.GetString();
+                            if (!string.IsNullOrEmpty(generatedVideoUrl))
+                            {
+                                replyAttachmentUrl = generatedVideoUrl;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        var err = await apiResponse.Content.ReadAsStringAsync();
+                        Console.WriteLine($"[Fal.ai Video Gen Error]: {err}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Fal.ai Connection Exception]: {ex.Message}");
+                }
+            }
         }
 
         // 5. Save AI message
