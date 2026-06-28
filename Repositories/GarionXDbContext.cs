@@ -101,14 +101,6 @@ public class GarionXDbContext : DbContext
         modelBuilder.Entity<Personality>().HasData(
             new Personality
             {
-                Id = "auto",
-                Name = "Auto (Rekomendasi)",
-                Description = "Secara otomatis memilih kepribadian terbaik berdasarkan deskripsi atau perintah Anda.",
-                SystemPrompt = "You are a cybernetic classifier. You analyze prompts and route them to the most suitable personality module.",
-                AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=auto"
-            },
-            new Personality
-            {
                 Id = "garionx",
                 Name = "GarionX Core",
                 Description = "The cybernetic default model designed for high-context analytical thinking and system design.",

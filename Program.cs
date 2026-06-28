@@ -183,24 +183,9 @@ using (var scope = app.Services.CreateScope())
 
         // Synchronize default seeded personalities in DB with current definitions
         var autoBot = db.Personalities.FirstOrDefault(p => p.Id == "auto");
-        if (autoBot == null)
+        if (autoBot != null)
         {
-            autoBot = new Personality
-            {
-                Id = "auto",
-                Name = "Auto (Rekomendasi)",
-                Description = "Secara otomatis memilih kepribadian terbaik berdasarkan deskripsi atau perintah Anda.",
-                SystemPrompt = "You are a cybernetic classifier. You analyze prompts and route them to the most suitable personality module.",
-                AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=auto"
-            };
-            db.Personalities.Add(autoBot);
-        }
-        else
-        {
-            autoBot.Name = "Auto (Rekomendasi)";
-            autoBot.Description = "Secara otomatis memilih kepribadian terbaik berdasarkan deskripsi atau perintah Anda.";
-            autoBot.SystemPrompt = "You are a cybernetic classifier. You analyze prompts and route them to the most suitable personality module.";
-            autoBot.AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=auto";
+            db.Personalities.Remove(autoBot);
         }
 
         var imageGen = db.Personalities.FirstOrDefault(p => p.Id == "image_generator");
