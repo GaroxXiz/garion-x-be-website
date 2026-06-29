@@ -620,12 +620,6 @@ public class AuthController : ControllerBase
             return BadRequest("Email is required.");
         }
 
-        var existingUser = await _chatRepository.GetUserByUsernameAsync(request.Email);
-        if (existingUser != null)
-        {
-            return Conflict("Email is already registered. Please sign in instead.");
-        }
-
         var brevoApiKey = Environment.GetEnvironmentVariable("BREVO_API_KEY");
         var resendApiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
         var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
@@ -725,7 +719,15 @@ public class AuthController : ControllerBase
 
         // Find user by email
         var user = await _chatRepository.GetUserByUsernameAsync(request.Email);
-        if (user == null)
+        if (user != null)
+        {
+            // If they are registering (indicated by request.Name or request.Password not null)
+            if (!string.IsNullOrWhiteSpace(request.Name))
+            {
+                return BadRequest("Email is already registered. Please sign in instead.");
+            }
+        }
+        else
         {
             // If user doesn't exist, register them on the fly
             var username = request.Email.Split('@')[0];
