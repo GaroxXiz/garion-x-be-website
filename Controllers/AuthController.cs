@@ -512,6 +512,62 @@ public class AuthController : ControllerBase
         }
     }
 
+    private async Task<bool> SendOtpViaBrevoAsync(string toEmail, string otp)
+    {
+        var brevoApiKey = Environment.GetEnvironmentVariable("BREVO_API_KEY");
+        var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER") ?? "maulanarizwan84@gmail.com";
+
+        if (string.IsNullOrWhiteSpace(brevoApiKey))
+        {
+            return false;
+        }
+
+        try
+        {
+            var emailData = new
+            {
+                sender = new { name = "Garion-X Terminal", email = smtpUser },
+                to = new[] { new { email = toEmail } },
+                subject = "🔑 Garion-X Terminal OTP Security Code",
+                htmlContent = $@"
+<div style=""font-family: monospace; background-color: #0d0e15; color: #e2e8f0; padding: 30px; border: 1px solid #1e293b; border-radius: 8px; max-width: 500px; margin: auto;"">
+    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">Garion-X Terminal Auth</h2>
+    <hr style=""border-color: #334155; margin: 20px 0;"" />
+    <p>System requested a security code for your session.</p>
+    <p>Please enter the following 6-digit OTP code to complete authorization:</p>
+    <div style=""background: rgba(0, 255, 204, 0.05); border: 1px dashed #00ffcc; padding: 15px; border-radius: 6px; text-align: center; margin: 25px 0;"">
+        <span style=""font-size: 2.2rem; font-weight: bold; color: #00ffcc; letter-spacing: 8px; font-family: monospace;"">{otp}</span>
+    </div>
+    <p style=""font-size: 0.8rem; color: #64748b; text-align: center;"">This security code is strictly confidential and will expire in <strong>5 minutes</strong>.</p>
+    <p style=""font-size: 0.8rem; color: #64748b; text-align: center;"">If you did not request this code, please ignore this email.</p>
+</div>"
+            };
+
+            var jsonContent = JsonSerializer.Serialize(emailData);
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, "https://api.brevo.com/v3/smtp/email");
+            requestMessage.Headers.Add("api-key", brevoApiKey);
+            requestMessage.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.SendAsync(requestMessage);
+            if (response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[GARIONX BREVO] OTP email sent successfully to {toEmail}");
+                return true;
+            }
+            else
+            {
+                var errorResponse = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"[GARIONX BREVO ERROR] Brevo API failed: {response.StatusCode} - {errorResponse}");
+                throw new Exception($"Brevo API Error: {response.StatusCode} - {errorResponse}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GARIONX BREVO ERROR] Failed to send email to {toEmail} via Brevo: {ex.Message}");
+            throw;
+        }
+    }
+
     [HttpPost("send-otp")]
     public async Task<IActionResult> SendOtp([FromBody] SendOtpRequest request)
     {
@@ -520,11 +576,13 @@ public class AuthController : ControllerBase
             return BadRequest("Email is required.");
         }
 
+        var brevoApiKey = Environment.GetEnvironmentVariable("BREVO_API_KEY");
         var resendApiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
         var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
         var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
 
-        var isMock = string.IsNullOrWhiteSpace(resendApiKey) && 
+        var isMock = string.IsNullOrWhiteSpace(brevoApiKey) && 
+                     string.IsNullOrWhiteSpace(resendApiKey) && 
                      (string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass));
 
         // Generate 6 digit OTP
@@ -545,7 +603,25 @@ public class AuthController : ControllerBase
             });
         }
 
-        // Try Resend API if API Key is configured
+        // 1. Try Brevo API if API Key is configured (Best for domain-free transactional emails)
+        if (!string.IsNullOrWhiteSpace(brevoApiKey))
+        {
+            try
+            {
+                await SendOtpViaBrevoAsync(request.Email, otp);
+                return Ok(new { 
+                    message = "OTP sent successfully via Brevo HTTP API.", 
+                    otp = (string?)null, 
+                    isMock = false 
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Gagal mengirim email OTP via Brevo API. Detail Error: {ex.Message}");
+            }
+        }
+
+        // 2. Try Resend API if API Key is configured
         if (!string.IsNullOrWhiteSpace(resendApiKey))
         {
             try
@@ -563,9 +639,9 @@ public class AuthController : ControllerBase
             }
         }
 
+        // 3. Fallback to Gmail SMTP
         try
         {
-            // Send OTP via Gmail SMTP
             SendOtpViaGmail(request.Email, otp);
             
             return Ok(new { 
