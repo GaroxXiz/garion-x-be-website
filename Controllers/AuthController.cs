@@ -458,17 +458,74 @@ public class AuthController : ControllerBase
         }
     }
 
+    private async Task<bool> SendOtpViaResendAsync(string toEmail, string otp)
+    {
+        var resendApiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
+        if (string.IsNullOrWhiteSpace(resendApiKey))
+        {
+            return false;
+        }
+
+        try
+        {
+            var emailData = new
+            {
+                from = "Garion-X Terminal <onboarding@resend.dev>",
+                to = new[] { toEmail },
+                subject = "🔑 Garion-X Terminal OTP Security Code",
+                html = $@"
+<div style=""font-family: monospace; background-color: #0d0e15; color: #e2e8f0; padding: 30px; border: 1px solid #1e293b; border-radius: 8px; max-width: 500px; margin: auto;"">
+    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">Garion-X Terminal Auth</h2>
+    <hr style=""border-color: #334155; margin: 20px 0;"" />
+    <p>System requested a security code for your session.</p>
+    <p>Please enter the following 6-digit OTP code to complete authorization:</p>
+    <div style=""background: rgba(0, 255, 204, 0.05); border: 1px dashed #00ffcc; padding: 15px; border-radius: 6px; text-align: center; margin: 25px 0;"">
+        <span style=""font-size: 2.2rem; font-weight: bold; color: #00ffcc; letter-spacing: 8px; font-family: monospace;"">{otp}</span>
+    </div>
+    <p style=""font-size: 0.8rem; color: #64748b; text-align: center;"">This security code is strictly confidential and will expire in <strong>5 minutes</strong>.</p>
+    <p style=""font-size: 0.8rem; color: #64748b; text-align: center;"">If you did not request this code, please ignore this email.</p>
+</div>"
+            };
+
+            var jsonContent = JsonSerializer.Serialize(emailData);
+            using var requestMessage = new HttpRequestMessage(HttpMethod.Post, "https://api.resend.com/emails");
+            requestMessage.Headers.Add("Authorization", $"Bearer {resendApiKey}");
+            requestMessage.Content = new StringContent(jsonContent, Encoding.UTF8, "application/json");
+
+            var response = await _httpClient.SendAsync(requestMessage);
+            if (response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[GARIONX RESEND] OTP email sent successfully to {toEmail}");
+                return true;
+            }
+            else
+            {
+                var errorResponse = await response.Content.ReadAsStringAsync();
+                Console.WriteLine($"[GARIONX RESEND ERROR] Resend API failed: {response.StatusCode} - {errorResponse}");
+                throw new Exception($"Resend API Error: {response.StatusCode} - {errorResponse}");
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GARIONX RESEND ERROR] Failed to send email to {toEmail} via Resend: {ex.Message}");
+            throw;
+        }
+    }
+
     [HttpPost("send-otp")]
-    public IActionResult SendOtp([FromBody] SendOtpRequest request)
+    public async Task<IActionResult> SendOtp([FromBody] SendOtpRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Email))
         {
             return BadRequest("Email is required.");
         }
 
+        var resendApiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
         var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
         var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
-        var isMock = string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass);
+
+        var isMock = string.IsNullOrWhiteSpace(resendApiKey) && 
+                     (string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass));
 
         // Generate 6 digit OTP
         var random = new Random();
@@ -486,6 +543,24 @@ public class AuthController : ControllerBase
                 otp = otp, 
                 isMock = true 
             });
+        }
+
+        // Try Resend API if API Key is configured
+        if (!string.IsNullOrWhiteSpace(resendApiKey))
+        {
+            try
+            {
+                await SendOtpViaResendAsync(request.Email, otp);
+                return Ok(new { 
+                    message = "OTP sent successfully via Resend HTTP API.", 
+                    otp = (string?)null, 
+                    isMock = false 
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest($"Gagal mengirim email OTP via Resend API. Detail Error: {ex.Message}");
+            }
         }
 
         try
