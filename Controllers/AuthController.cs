@@ -79,7 +79,7 @@ public class AuthController : ControllerBase
     }
 
     [HttpPost("login")]
-    public async Task<ActionResult<AuthResponse>> Login([FromBody] LoginRequest request)
+    public async Task<ActionResult> Login([FromBody] LoginRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
         {
@@ -98,16 +98,60 @@ public class AuthController : ControllerBase
             return Unauthorized("Invalid email or password.");
         }
 
-        var token = _tokenGenerator.GenerateToken(user);
+        // Credentials verified! Generate and send OTP
+        var random = new Random();
+        var otp = random.Next(100000, 999999).ToString();
+        var expiry = DateTime.UtcNow.AddMinutes(5);
 
-        return Ok(new AuthResponse
+        // Store OTP
+        OtpStore[request.Email.ToLower()] = (otp, expiry);
+
+        var brevoApiKey = Environment.GetEnvironmentVariable("BREVO_API_KEY");
+        var resendApiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
+        var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
+        var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
+
+        var isMock = string.IsNullOrWhiteSpace(brevoApiKey) && 
+                     string.IsNullOrWhiteSpace(resendApiKey) && 
+                     (string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass));
+
+        if (isMock)
         {
-            Token = token,
-            Username = user.Username,
-            Email = user.Email,
-            Name = user.Name,
-            AvatarUrl = user.AvatarUrl
-        });
+            Console.WriteLine($"[GARIONX OTP] (SIMULATED DEV) Code for {request.Email} is: {otp}");
+            return Ok(new { 
+                requiresOtp = true, 
+                message = "Credentials verified. OTP simulated in dev console.", 
+                otp = otp, 
+                isMock = true 
+            });
+        }
+
+        try
+        {
+            if (!string.IsNullOrWhiteSpace(brevoApiKey))
+            {
+                await SendOtpViaBrevoAsync(request.Email, otp);
+            }
+            else if (!string.IsNullOrWhiteSpace(resendApiKey))
+            {
+                await SendOtpViaResendAsync(request.Email, otp);
+            }
+            else
+            {
+                SendOtpViaGmail(request.Email, otp);
+            }
+
+            return Ok(new { 
+                requiresOtp = true, 
+                message = "Credentials verified. OTP sent successfully.", 
+                otp = (string?)null, 
+                isMock = false 
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Gagal mengirim email verifikasi OTP. Detail Error: {ex.Message}");
+        }
     }
 
     private async Task<List<SecurityKey>> GetFirebaseSigningKeysAsync()
@@ -576,6 +620,12 @@ public class AuthController : ControllerBase
             return BadRequest("Email is required.");
         }
 
+        var existingUser = await _chatRepository.GetUserByUsernameAsync(request.Email);
+        if (existingUser != null)
+        {
+            return Conflict("Email is already registered. Please sign in instead.");
+        }
+
         var brevoApiKey = Environment.GetEnvironmentVariable("BREVO_API_KEY");
         var resendApiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
         var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
@@ -688,10 +738,12 @@ public class AuthController : ControllerBase
                 uniqueUsername = $"{username}{suffix}";
             }
 
+            var passwordToHash = string.IsNullOrWhiteSpace(request.Password) ? Guid.NewGuid().ToString() : request.Password;
+
             user = new User
             {
                 Username = uniqueUsername,
-                PasswordHash = HashPassword(Guid.NewGuid().ToString()), // Random hash for passwordless
+                PasswordHash = HashPassword(passwordToHash),
                 Email = request.Email,
                 Name = string.IsNullOrWhiteSpace(request.Name) ? username : request.Name,
                 AvatarUrl = $"https://api.dicebear.com/7.x/bottts/svg?seed={Uri.EscapeDataString(uniqueUsername)}"
