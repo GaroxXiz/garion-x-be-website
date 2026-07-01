@@ -298,25 +298,7 @@ public class AuthController : ControllerBase
         });
     }
 
-    [HttpPost("reset-password")]
-    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.Username) || string.IsNullOrWhiteSpace(request.NewPassword))
-        {
-            return BadRequest("Username and NewPassword are required.");
-        }
 
-        var user = await _chatRepository.GetUserByUsernameAsync(request.Username);
-        if (user == null)
-        {
-            return NotFound("User not found.");
-        }
-
-        var newHash = HashPassword(request.NewPassword);
-        await _chatRepository.UpdateUserPasswordAsync(request.Username, newHash);
-
-        return Ok(new { message = "Password has been reset successfully." });
-    }
 
     [Authorize]
     [HttpGet("profile")]
@@ -448,8 +430,9 @@ public class AuthController : ControllerBase
     }
 
     private static readonly Dictionary<string, (string Otp, DateTime Expiry)> OtpStore = new();
+    private static readonly Dictionary<string, (string Otp, DateTime Expiry)> ResetOtpStore = new();
 
-    private static void SendOtpViaGmail(string toEmail, string otp)
+    private static void SendOtpViaGmail(string toEmail, string otp, bool isPasswordReset = false)
     {
         var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
         var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
@@ -459,9 +442,14 @@ public class AuthController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass))
         {
-            Console.WriteLine($"[GARIONX SMTP WARNING] SMTP_USER or SMTP_PASS not set. Falling back to console only. OTP for {toEmail} is: {otp}");
+            Console.WriteLine($"[GARIONX SMTP WARNING] SMTP_USER or SMTP_PASS not set. Falling back to console only. OTP (Reset={isPasswordReset}) for {toEmail} is: {otp}");
             return;
         }
+
+        var subject = isPasswordReset ? "🔒 Garion-X Password Reset Verification Code" : "🔑 Garion-X Terminal OTP Security Code";
+        var title = isPasswordReset ? "Garion-X Reset" : "Garion-X Terminal Auth";
+        var desc1 = isPasswordReset ? "System requested a password reset for your account." : "System requested a security code for your session.";
+        var desc2 = isPasswordReset ? "Please enter the following 6-digit verification code to reset your password:" : "Please enter the following 6-digit OTP code to complete authorization:";
 
         try
         {
@@ -475,13 +463,13 @@ public class AuthController : ControllerBase
             var mailMessage = new System.Net.Mail.MailMessage
             {
                 From = new System.Net.Mail.MailAddress(smtpUser, "Garion-X Terminal Services"),
-                Subject = "🔑 Garion-X Terminal OTP Security Code",
+                Subject = subject,
                 Body = $@"
 <div style=""font-family: monospace; background-color: #0d0e15; color: #e2e8f0; padding: 30px; border: 1px solid #1e293b; border-radius: 8px; max-width: 500px; margin: auto;"">
-    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">Garion-X Terminal Auth</h2>
+    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">{title}</h2>
     <hr style=""border-color: #334155; margin: 20px 0;"" />
-    <p>System requested a security code for your session.</p>
-    <p>Please enter the following 6-digit OTP code to complete authorization:</p>
+    <p>{desc1}</p>
+    <p>{desc2}</p>
     <div style=""background: rgba(0, 255, 204, 0.05); border: 1px dashed #00ffcc; padding: 15px; border-radius: 6px; text-align: center; margin: 25px 0;"">
         <span style=""font-size: 2.2rem; font-weight: bold; color: #00ffcc; letter-spacing: 8px; font-family: monospace;"">{otp}</span>
     </div>
@@ -493,16 +481,16 @@ public class AuthController : ControllerBase
 
             mailMessage.To.Add(toEmail);
             client.Send(mailMessage);
-            Console.WriteLine($"[GARIONX SMTP] OTP email sent successfully to {toEmail}");
+            Console.WriteLine($"[GARIONX SMTP] OTP email (Reset={isPasswordReset}) sent successfully to {toEmail}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[GARIONX SMTP ERROR] Failed to send email to {toEmail}: {ex.Message}");
+            Console.WriteLine($"[GARIONX SMTP ERROR] Failed to send email (Reset={isPasswordReset}) to {toEmail}: {ex.Message}");
             throw; // Rethrow to propagate to the controller
         }
     }
 
-    private async Task<bool> SendOtpViaResendAsync(string toEmail, string otp)
+    private async Task<bool> SendOtpViaResendAsync(string toEmail, string otp, bool isPasswordReset = false)
     {
         var resendApiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
         if (string.IsNullOrWhiteSpace(resendApiKey))
@@ -510,19 +498,24 @@ public class AuthController : ControllerBase
             return false;
         }
 
+        var subject = isPasswordReset ? "🔒 Garion-X Password Reset Verification Code" : "🔑 Garion-X Terminal OTP Security Code";
+        var title = isPasswordReset ? "Garion-X Reset" : "Garion-X Terminal Auth";
+        var desc1 = isPasswordReset ? "System requested a password reset for your account." : "System requested a security code for your session.";
+        var desc2 = isPasswordReset ? "Please enter the following 6-digit verification code to reset your password:" : "Please enter the following 6-digit OTP code to complete authorization:";
+
         try
         {
             var emailData = new
             {
                 from = "Garion-X Terminal <onboarding@resend.dev>",
                 to = new[] { toEmail },
-                subject = "🔑 Garion-X Terminal OTP Security Code",
+                subject = subject,
                 html = $@"
 <div style=""font-family: monospace; background-color: #0d0e15; color: #e2e8f0; padding: 30px; border: 1px solid #1e293b; border-radius: 8px; max-width: 500px; margin: auto;"">
-    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">Garion-X Terminal Auth</h2>
+    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">{title}</h2>
     <hr style=""border-color: #334155; margin: 20px 0;"" />
-    <p>System requested a security code for your session.</p>
-    <p>Please enter the following 6-digit OTP code to complete authorization:</p>
+    <p>{desc1}</p>
+    <p>{desc2}</p>
     <div style=""background: rgba(0, 255, 204, 0.05); border: 1px dashed #00ffcc; padding: 15px; border-radius: 6px; text-align: center; margin: 25px 0;"">
         <span style=""font-size: 2.2rem; font-weight: bold; color: #00ffcc; letter-spacing: 8px; font-family: monospace;"">{otp}</span>
     </div>
@@ -539,7 +532,7 @@ public class AuthController : ControllerBase
             var response = await _httpClient.SendAsync(requestMessage);
             if (response.IsSuccessStatusCode)
             {
-                Console.WriteLine($"[GARIONX RESEND] OTP email sent successfully to {toEmail}");
+                Console.WriteLine($"[GARIONX RESEND] OTP email (Reset={isPasswordReset}) sent successfully to {toEmail}");
                 return true;
             }
             else
@@ -551,12 +544,12 @@ public class AuthController : ControllerBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[GARIONX RESEND ERROR] Failed to send email to {toEmail} via Resend: {ex.Message}");
+            Console.WriteLine($"[GARIONX RESEND ERROR] Failed to send email (Reset={isPasswordReset}) to {toEmail} via Resend: {ex.Message}");
             throw;
         }
     }
 
-    private async Task<bool> SendOtpViaBrevoAsync(string toEmail, string otp)
+    private async Task<bool> SendOtpViaBrevoAsync(string toEmail, string otp, bool isPasswordReset = false)
     {
         var brevoApiKey = Environment.GetEnvironmentVariable("BREVO_API_KEY");
         var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER") ?? "maulanarizwan84@gmail.com";
@@ -566,19 +559,24 @@ public class AuthController : ControllerBase
             return false;
         }
 
+        var subject = isPasswordReset ? "🔒 Garion-X Password Reset Verification Code" : "🔑 Garion-X Terminal OTP Security Code";
+        var title = isPasswordReset ? "Garion-X Reset" : "Garion-X Terminal Auth";
+        var desc1 = isPasswordReset ? "System requested a password reset for your account." : "System requested a security code for your session.";
+        var desc2 = isPasswordReset ? "Please enter the following 6-digit verification code to reset your password:" : "Please enter the following 6-digit OTP code to complete authorization:";
+
         try
         {
             var emailData = new
             {
                 sender = new { name = "Garion-X Terminal", email = smtpUser },
                 to = new[] { new { email = toEmail } },
-                subject = "🔑 Garion-X Terminal OTP Security Code",
+                subject = subject,
                 htmlContent = $@"
 <div style=""font-family: monospace; background-color: #0d0e15; color: #e2e8f0; padding: 30px; border: 1px solid #1e293b; border-radius: 8px; max-width: 500px; margin: auto;"">
-    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">Garion-X Terminal Auth</h2>
+    <h2 style=""color: #00ffcc; text-align: center; text-transform: uppercase; letter-spacing: 2px;"">{title}</h2>
     <hr style=""border-color: #334155; margin: 20px 0;"" />
-    <p>System requested a security code for your session.</p>
-    <p>Please enter the following 6-digit OTP code to complete authorization:</p>
+    <p>{desc1}</p>
+    <p>{desc2}</p>
     <div style=""background: rgba(0, 255, 204, 0.05); border: 1px dashed #00ffcc; padding: 15px; border-radius: 6px; text-align: center; margin: 25px 0;"">
         <span style=""font-size: 2.2rem; font-weight: bold; color: #00ffcc; letter-spacing: 8px; font-family: monospace;"">{otp}</span>
     </div>
@@ -595,7 +593,7 @@ public class AuthController : ControllerBase
             var response = await _httpClient.SendAsync(requestMessage);
             if (response.IsSuccessStatusCode)
             {
-                Console.WriteLine($"[GARIONX BREVO] OTP email sent successfully to {toEmail}");
+                Console.WriteLine($"[GARIONX BREVO] OTP email (Reset={isPasswordReset}) sent successfully to {toEmail}");
                 return true;
             }
             else
@@ -607,7 +605,7 @@ public class AuthController : ControllerBase
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[GARIONX BREVO ERROR] Failed to send email to {toEmail} via Brevo: {ex.Message}");
+            Console.WriteLine($"[GARIONX BREVO ERROR] Failed to send email (Reset={isPasswordReset}) to {toEmail} via Brevo: {ex.Message}");
             throw;
         }
     }
@@ -763,5 +761,114 @@ public class AuthController : ControllerBase
             Name = user.Name,
             AvatarUrl = user.AvatarUrl
         });
+    }
+
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email))
+        {
+            return BadRequest("Email is required.");
+        }
+
+        var user = await _chatRepository.GetUserByUsernameAsync(request.Email);
+        if (user == null)
+        {
+            return NotFound("Email address not found.");
+        }
+
+        var brevoApiKey = Environment.GetEnvironmentVariable("BREVO_API_KEY");
+        var resendApiKey = Environment.GetEnvironmentVariable("RESEND_API_KEY");
+        var smtpUser = Environment.GetEnvironmentVariable("SMTP_USER");
+        var smtpPass = Environment.GetEnvironmentVariable("SMTP_PASS");
+
+        var isMock = string.IsNullOrWhiteSpace(brevoApiKey) && 
+                     string.IsNullOrWhiteSpace(resendApiKey) && 
+                     (string.IsNullOrWhiteSpace(smtpUser) || string.IsNullOrWhiteSpace(smtpPass));
+
+        // Generate 6 digit Reset OTP
+        var random = new Random();
+        var otp = random.Next(100000, 999999).ToString();
+        var expiry = DateTime.UtcNow.AddMinutes(5);
+
+        // Store Reset OTP
+        ResetOtpStore[request.Email.ToLower()] = (otp, expiry);
+
+        if (isMock)
+        {
+            Console.WriteLine($"[GARIONX PASSWORD RESET OTP] (SIMULATED DEV) Code for {request.Email} is: {otp}");
+            return Ok(new { 
+                message = "Password reset OTP simulated in dev console.", 
+                otp = otp, 
+                isMock = true 
+            });
+        }
+
+        try
+        {
+            // 1. Try Brevo API
+            if (!string.IsNullOrWhiteSpace(brevoApiKey))
+            {
+                await SendOtpViaBrevoAsync(request.Email, otp, isPasswordReset: true);
+                return Ok(new { 
+                    message = "Password reset OTP sent successfully via Brevo HTTP API.", 
+                    otp = (string?)null, 
+                    isMock = false 
+                });
+            }
+
+            // 2. Try Resend API
+            if (!string.IsNullOrWhiteSpace(resendApiKey))
+            {
+                await SendOtpViaResendAsync(request.Email, otp, isPasswordReset: true);
+                return Ok(new { 
+                    message = "Password reset OTP sent successfully via Resend HTTP API.", 
+                    otp = (string?)null, 
+                    isMock = false 
+                });
+            }
+
+            // 3. Fallback to SMTP
+            SendOtpViaGmail(request.Email, otp, isPasswordReset: true);
+            return Ok(new { 
+                message = "Password reset OTP sent successfully via Gmail SMTP.", 
+                otp = (string?)null, 
+                isMock = false 
+            });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest($"Gagal mengirim email reset password. Detail Error: {ex.Message}");
+        }
+    }
+
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Otp) || string.IsNullOrWhiteSpace(request.NewPassword))
+        {
+            return BadRequest("Email, OTP, and New Password are required.");
+        }
+
+        var emailKey = request.Email.ToLower();
+        if (!ResetOtpStore.TryGetValue(emailKey, out var value) || value.Otp != request.Otp || DateTime.UtcNow > value.Expiry)
+        {
+            return BadRequest("Invalid or expired password reset verification code.");
+        }
+
+        // OTP verified, remove it
+        ResetOtpStore.Remove(emailKey);
+
+        var user = await _chatRepository.GetUserByUsernameAsync(request.Email);
+        if (user == null)
+        {
+            return NotFound("User not found.");
+        }
+
+        // Hash and update the password
+        var newHash = HashPassword(request.NewPassword);
+        await _chatRepository.UpdateUserPasswordAsync(user.Username, newHash);
+
+        return Ok(new { message = "Password has been reset successfully. Please sign in with your new password." });
     }
 }
