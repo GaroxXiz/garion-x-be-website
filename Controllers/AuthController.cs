@@ -98,6 +98,21 @@ public class AuthController : ControllerBase
             return Unauthorized("Invalid email or password.");
         }
 
+        // Bypass OTP for Superadmin
+        if (request.Email.Equals("superadmin@garionx.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var token = _tokenGenerator.GenerateToken(user);
+            return Ok(new
+            {
+                requiresOtp = false,
+                token = token,
+                username = user.Username,
+                email = user.Email,
+                name = user.Name,
+                avatarUrl = user.AvatarUrl
+            });
+        }
+
         // Credentials verified! Generate and send OTP
         var random = new Random();
         var otp = random.Next(100000, 999999).ToString();
