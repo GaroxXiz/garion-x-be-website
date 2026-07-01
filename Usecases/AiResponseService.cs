@@ -88,15 +88,15 @@ public class AiResponseService : IAiResponseService
 
                 string groqModel = model.ToLower() switch
                 {
-                    "gemini" => "gemma2-9b-it",
-                    "claude" => "mixtral-8x7b-32768",
+                    "gemini" => "llama-3.1-8b-instant",
+                    "claude" => "llama-3.3-70b-versatile",
                     _ => "llama-3.3-70b-versatile"
                 };
 
                 if (hasImage)
                 {
                     // Force a vision model on Groq when an image is present
-                    groqModel = "meta-llama/llama-4-scout-17b-16e-instruct";
+                    groqModel = "llama-3.2-11b-vision-preview";
                 }
 
                 return model.ToLower() switch
