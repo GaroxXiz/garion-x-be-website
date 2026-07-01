@@ -279,8 +279,39 @@ using (var scope = app.Services.CreateScope())
             codeSandbox.AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=code_sandbox";
         }
 
+        // Seed Superadmin user
+        var superadminEmail = "superadmin@garionx.com";
+        var superadminUser = db.Users.FirstOrDefault(u => u.Email == superadminEmail || u.Username == "superadmin");
+        if (superadminUser == null)
+        {
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var pwBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes("GarionX2026!"));
+            var passwordHash = Convert.ToBase64String(pwBytes);
+
+            superadminUser = new User
+            {
+                Username = "superadmin",
+                Email = superadminEmail,
+                Name = "Superadmin GarionX",
+                PasswordHash = passwordHash,
+                AvatarUrl = "https://api.dicebear.com/7.x/bottts/svg?seed=superadmin"
+            };
+            db.Users.Add(superadminUser);
+            Console.WriteLine("[GarionX Backend] Superadmin user seeded successfully.");
+        }
+        else
+        {
+            // Ensure superadmin password and name remain correct
+            using var sha256 = System.Security.Cryptography.SHA256.Create();
+            var pwBytes = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes("GarionX2026!"));
+            var passwordHash = Convert.ToBase64String(pwBytes);
+            superadminUser.PasswordHash = passwordHash;
+            superadminUser.Email = superadminEmail;
+            superadminUser.Name = "Superadmin GarionX";
+        }
+
         db.SaveChanges();
-        Console.WriteLine("[GarionX Backend] Seeded personalities synchronized successfully.");
+        Console.WriteLine("[GarionX Backend] Seeded personalities and superadmin synchronized successfully.");
     }
     catch (Exception ex)
     {
