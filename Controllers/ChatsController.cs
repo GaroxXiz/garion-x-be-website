@@ -230,6 +230,7 @@ public class ChatsController : ControllerBase
             string model = "openai";
             if (request.Model.Equals("claude", StringComparison.OrdinalIgnoreCase)) model = "claude";
             else if (request.Model.Equals("gemini", StringComparison.OrdinalIgnoreCase)) model = "gemini";
+            else if (request.Model.Equals("arena", StringComparison.OrdinalIgnoreCase)) model = "arena";
 
             chat.Model = model;
             await _chatRepository.UpdateChatModelAsync(chatId, model);
