@@ -18,6 +18,7 @@ public interface IAiResponseService
 
 public class AiResponseService : IAiResponseService
 {
+    private static readonly System.Threading.SemaphoreSlim _dbSemaphore = new System.Threading.SemaphoreSlim(1, 1);
     private readonly IChatRepository _chatRepository;
     private readonly HttpClient _httpClient;
 
@@ -155,7 +156,16 @@ public class AiResponseService : IAiResponseService
             // Proactively check token usage constraints for non-superadmin users
             if (!isSuperAdmin)
             {
-                var usages = (await _chatRepository.GetTokenUsagesAsync(userId)).ToList();
+                List<TokenUsage> usages;
+                await _dbSemaphore.WaitAsync();
+                try
+                {
+                    usages = (await _chatRepository.GetTokenUsagesAsync(userId)).ToList();
+                }
+                finally
+                {
+                    _dbSemaphore.Release();
+                }
                 var usage = usages.FirstOrDefault(u => u.Model == modelKey);
                 if (usage != null)
                 {
@@ -241,7 +251,7 @@ public class AiResponseService : IAiResponseService
                 else if (hasGroqKey)
                 {
                     // Use a distinct model for OpenAI fallback on Groq so the columns are different!
-                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.2-3b-preview";
+                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.2-3b-instruct";
                     return await CallGroqAsync(userId, systemPrompt, history, "openai", groqModel);
                 }
                 else
@@ -339,7 +349,17 @@ public class AiResponseService : IAiResponseService
         {
             long totalTokens = usage.TryGetProperty("total_tokens", out var tt) ? tt.GetInt64() : 0;
             if (totalTokens > 0)
-                await _chatRepository.IncrementTokenUsageAsync(userId, slot, totalTokens);
+            {
+                await _dbSemaphore.WaitAsync();
+                try
+                {
+                    await _chatRepository.IncrementTokenUsageAsync(userId, slot, totalTokens);
+                }
+                finally
+                {
+                    _dbSemaphore.Release();
+                }
+            }
         }
 
         if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
@@ -442,7 +462,18 @@ public class AiResponseService : IAiResponseService
         if (root.TryGetProperty("usageMetadata", out var usageMeta))
         {
             long total = usageMeta.TryGetProperty("totalTokenCount", out var ttc) ? ttc.GetInt64() : 0;
-            if (total > 0) await _chatRepository.IncrementTokenUsageAsync(userId, "gemini", total);
+            if (total > 0)
+            {
+                await _dbSemaphore.WaitAsync();
+                try
+                {
+                    await _chatRepository.IncrementTokenUsageAsync(userId, "gemini", total);
+                }
+                finally
+                {
+                    _dbSemaphore.Release();
+                }
+            }
         }
 
         if (root.TryGetProperty("candidates", out var candidates) && candidates.GetArrayLength() > 0)
@@ -523,7 +554,18 @@ public class AiResponseService : IAiResponseService
         if (root.TryGetProperty("usage", out var usage))
         {
             long total = usage.TryGetProperty("total_tokens", out var tt) ? tt.GetInt64() : 0;
-            if (total > 0) await _chatRepository.IncrementTokenUsageAsync(userId, "openai", total);
+            if (total > 0)
+            {
+                await _dbSemaphore.WaitAsync();
+                try
+                {
+                    await _chatRepository.IncrementTokenUsageAsync(userId, "openai", total);
+                }
+                finally
+                {
+                    _dbSemaphore.Release();
+                }
+            }
         }
         if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
         {
@@ -610,7 +652,18 @@ public class AiResponseService : IAiResponseService
         {
             long total = (usage.TryGetProperty("input_tokens", out var it) ? it.GetInt64() : 0)
                        + (usage.TryGetProperty("output_tokens", out var ot) ? ot.GetInt64() : 0);
-            if (total > 0) await _chatRepository.IncrementTokenUsageAsync(userId, "claude", total);
+            if (total > 0)
+            {
+                await _dbSemaphore.WaitAsync();
+                try
+                {
+                    await _chatRepository.IncrementTokenUsageAsync(userId, "claude", total);
+                }
+                finally
+                {
+                    _dbSemaphore.Release();
+                }
+            }
         }
         if (root.TryGetProperty("content", out var contentArr) && contentArr.GetArrayLength() > 0)
         {
