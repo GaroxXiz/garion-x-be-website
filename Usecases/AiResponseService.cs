@@ -21,6 +21,28 @@ public class AiResponseService : IAiResponseService
     private readonly IChatRepository _chatRepository;
     private readonly HttpClient _httpClient;
 
+    // Token limit budgets per model per interval
+    private static readonly Dictionary<string, long> FiveHourlyBudgets = new()
+    {
+        { "openai", 20_000 },
+        { "gemini", 50_000 },
+        { "claude", 15_000 }
+    };
+
+    private static readonly Dictionary<string, long> WeeklyBudgets = new()
+    {
+        { "openai", 100_000 },
+        { "gemini", 250_000 },
+        { "claude", 75_000 }
+    };
+
+    private static readonly Dictionary<string, long> MonthlyBudgets = new()
+    {
+        { "openai", 500_000 },
+        { "gemini", 1_000_000 },
+        { "claude", 300_000 }
+    };
+
     public AiResponseService(IChatRepository chatRepository, HttpClient httpClient)
     {
         _chatRepository = chatRepository;
@@ -31,6 +53,55 @@ public class AiResponseService : IAiResponseService
     {
         try
         {
+            var chat = await _chatRepository.GetChatByIdAsync(chatId);
+            if (chat == null)
+            {
+                return "⚠️ Chat tidak ditemukan.";
+            }
+
+            var userId = chat.UserId;
+            var user = await _chatRepository.GetUserByIdAsync(userId);
+            bool isSuperAdmin = user != null && user.Email.Equals("superadmin@garionx.com", StringComparison.OrdinalIgnoreCase);
+
+            // Proactively check token usage constraints for non-superadmin users
+            if (!isSuperAdmin)
+            {
+                var modelKey = model.ToLower(); // "openai" | "gemini" | "claude"
+                var usages = (await _chatRepository.GetTokenUsagesAsync(userId)).ToList();
+                var usage = usages.FirstOrDefault(u => u.Model == modelKey);
+                if (usage != null)
+                {
+                    var fiveHourlyLimit = FiveHourlyBudgets.GetValueOrDefault(modelKey, 20_000);
+                    var weeklyLimit = WeeklyBudgets.GetValueOrDefault(modelKey, 100_000);
+                    var monthlyLimit = MonthlyBudgets.GetValueOrDefault(modelKey, 500_000);
+
+                    var now = DateTime.UtcNow;
+
+                    if (usage.FiveHourlyTokensUsed >= fiveHourlyLimit && now < usage.FiveHourlyResetTime)
+                    {
+                        var waitTime = usage.FiveHourlyResetTime - now;
+                        var hours = Math.Max(0, (int)waitTime.TotalHours);
+                        var minutes = Math.Max(0, waitTime.Minutes);
+                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token 5-jam ({fiveHourlyLimit:N0} token) untuk model ini. Silakan tunggu **{hours} jam {minutes} menit** hingga limit diperbarui (Waktu Reset: {usage.FiveHourlyResetTime.ToLocalTime():HH:mm:ss}).";
+                    }
+
+                    if (usage.WeeklyTokensUsed >= weeklyLimit && now < usage.WeeklyResetTime)
+                    {
+                        var waitTime = usage.WeeklyResetTime - now;
+                        var days = Math.Max(0, waitTime.Days);
+                        var hours = Math.Max(0, waitTime.Hours);
+                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token mingguan ({weeklyLimit:N0} token) untuk model ini. Silakan tunggu **{days} hari {hours} jam** hingga limit diperbarui.";
+                    }
+
+                    if (usage.MonthlyTokensUsed >= monthlyLimit && now < usage.MonthlyResetTime)
+                    {
+                        var waitTime = usage.MonthlyResetTime - now;
+                        var days = Math.Max(0, waitTime.Days);
+                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token bulanan ({monthlyLimit:N0} token) untuk model ini. Silakan tunggu **{days} hari** hingga limit diperbarui.";
+                    }
+                }
+            }
+
             var personality = await _chatRepository.GetPersonalityByIdAsync(personalityId);
             string systemPrompt = personality?.SystemPrompt ?? "You are a helpful assistant.";
             
@@ -85,7 +156,6 @@ public class AiResponseService : IAiResponseService
 
             if (hasGroqKey)
             {
-
                 string groqModel = model.ToLower() switch
                 {
                     "gemini" => "llama-3.1-8b-instant",
@@ -101,18 +171,18 @@ public class AiResponseService : IAiResponseService
 
                 return model.ToLower() switch
                 {
-                    "gemini" => await CallGroqAsync(systemPrompt, history, "gemini", groqModel),
-                    "claude" => await CallGroqAsync(systemPrompt, history, "claude", groqModel),
-                    _ => await CallGroqAsync(systemPrompt, history, "openai", groqModel)
+                    "gemini" => await CallGroqAsync(userId, systemPrompt, history, "gemini", groqModel),
+                    "claude" => await CallGroqAsync(userId, systemPrompt, history, "claude", groqModel),
+                    _ => await CallGroqAsync(userId, systemPrompt, history, "openai", groqModel)
                 };
             }
             else
             {
                 return model.ToLower() switch
                 {
-                    "gemini" => await CallGeminiAsync(systemPrompt, history),
-                    "claude" => await CallClaudeAsync(systemPrompt, history),
-                    _ => await CallOpenAiAsync(systemPrompt, history)
+                    "gemini" => await CallGeminiAsync(userId, systemPrompt, history),
+                    "claude" => await CallClaudeAsync(userId, systemPrompt, history),
+                    _ => await CallOpenAiAsync(userId, systemPrompt, history)
                 };
             }
         }
@@ -125,10 +195,9 @@ public class AiResponseService : IAiResponseService
 
     // ─────────────────────────────────────────────────────────────────────
     // Groq — Free, OpenAI-compatible API (replaces paid OpenAI & Claude)
-    // Models: llama-3.3-70b-versatile, compound-beta, gemma2-9b-it, etc.
-    // Docs: https://console.groq.com/docs/openai
     // ─────────────────────────────────────────────────────────────────────
     private async Task<string> CallGroqAsync(
+        Guid userId,
         string systemPrompt,
         IEnumerable<Message> history,
         string slot,        // "openai" | "gemini" | "claude" — for token tracking label
@@ -141,9 +210,9 @@ public class AiResponseService : IAiResponseService
         {
             return slot.ToLower() switch
             {
-                "openai" => await CallOpenAiAsync(systemPrompt, history),
-                "gemini" => await CallGeminiAsync(systemPrompt, history),
-                _ => await CallClaudeAsync(systemPrompt, history)
+                "openai" => await CallOpenAiAsync(userId, systemPrompt, history),
+                "gemini" => await CallGeminiAsync(userId, systemPrompt, history),
+                _ => await CallClaudeAsync(userId, systemPrompt, history)
             };
         }
 
@@ -206,7 +275,7 @@ public class AiResponseService : IAiResponseService
         {
             long totalTokens = usage.TryGetProperty("total_tokens", out var tt) ? tt.GetInt64() : 0;
             if (totalTokens > 0)
-                await _chatRepository.IncrementTokenUsageAsync(slot, totalTokens);
+                await _chatRepository.IncrementTokenUsageAsync(userId, slot, totalTokens);
         }
 
         if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
@@ -220,10 +289,9 @@ public class AiResponseService : IAiResponseService
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Gemini — Free via Google AI Studio (15 req/min, 1500 req/day)
-    // Get key: https://aistudio.google.com/apikey
+    // Gemini — Free via Google AI Studio
     // ─────────────────────────────────────────────────────────────────────
-    private async Task<string> CallGeminiAsync(string systemPrompt, IEnumerable<Message> history)
+    private async Task<string> CallGeminiAsync(Guid userId, string systemPrompt, IEnumerable<Message> history)
     {
         var apiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -310,7 +378,7 @@ public class AiResponseService : IAiResponseService
         if (root.TryGetProperty("usageMetadata", out var usageMeta))
         {
             long total = usageMeta.TryGetProperty("totalTokenCount", out var ttc) ? ttc.GetInt64() : 0;
-            if (total > 0) await _chatRepository.IncrementTokenUsageAsync("gemini", total);
+            if (total > 0) await _chatRepository.IncrementTokenUsageAsync(userId, "gemini", total);
         }
 
         if (root.TryGetProperty("candidates", out var candidates) && candidates.GetArrayLength() > 0)
@@ -333,10 +401,9 @@ public class AiResponseService : IAiResponseService
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // OpenAI — Berbayar, hanya dipakai jika GROQ_API_KEY tidak ada
-    // https://platform.openai.com/settings/billing
+    // OpenAI — Paid API fallback
     // ─────────────────────────────────────────────────────────────────────
-    private async Task<string> CallOpenAiAsync(string systemPrompt, IEnumerable<Message> history)
+    private async Task<string> CallOpenAiAsync(Guid userId, string systemPrompt, IEnumerable<Message> history)
     {
         var apiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -379,9 +446,9 @@ public class AiResponseService : IAiResponseService
             string friendly = TryExtractErrorMessage(rawBody);
             return response.StatusCode switch
             {
-                System.Net.HttpStatusCode.Unauthorized =>
-                    "❌ OpenAI: API key tidak valid.",
                 System.Net.HttpStatusCode.TooManyRequests =>
+                    $"❌ OpenAI: Rate limit tercapai. Silakan coba beberapa saat lagi.\n\nDetail: {friendly}",
+                System.Net.HttpStatusCode.PaymentRequired or System.Net.HttpStatusCode.BadRequest =>
                     $"❌ OpenAI: Kuota habis atau rate limit. Isi kredit di https://platform.openai.com/settings/billing, atau gunakan Groq (gratis) dengan mengisi `GROQ_API_KEY` di `.env`.\n\nDetail: {friendly}",
                 _ => $"❌ OpenAI error ({(int)response.StatusCode}): {friendly}"
             };
@@ -392,7 +459,7 @@ public class AiResponseService : IAiResponseService
         if (root.TryGetProperty("usage", out var usage))
         {
             long total = usage.TryGetProperty("total_tokens", out var tt) ? tt.GetInt64() : 0;
-            if (total > 0) await _chatRepository.IncrementTokenUsageAsync("openai", total);
+            if (total > 0) await _chatRepository.IncrementTokenUsageAsync(userId, "openai", total);
         }
         if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
         {
@@ -404,10 +471,9 @@ public class AiResponseService : IAiResponseService
     }
 
     // ─────────────────────────────────────────────────────────────────────
-    // Claude — Berbayar, hanya dipakai jika GROQ_API_KEY tidak ada
-    // https://console.anthropic.com
+    // Claude — Paid API fallback
     // ─────────────────────────────────────────────────────────────────────
-    private async Task<string> CallClaudeAsync(string systemPrompt, IEnumerable<Message> history)
+    private async Task<string> CallClaudeAsync(Guid userId, string systemPrompt, IEnumerable<Message> history)
     {
         var apiKey = Environment.GetEnvironmentVariable("CLAUDE_API_KEY");
         if (string.IsNullOrWhiteSpace(apiKey))
@@ -480,7 +546,7 @@ public class AiResponseService : IAiResponseService
         {
             long total = (usage.TryGetProperty("input_tokens", out var it) ? it.GetInt64() : 0)
                        + (usage.TryGetProperty("output_tokens", out var ot) ? ot.GetInt64() : 0);
-            if (total > 0) await _chatRepository.IncrementTokenUsageAsync("claude", total);
+            if (total > 0) await _chatRepository.IncrementTokenUsageAsync(userId, "claude", total);
         }
         if (root.TryGetProperty("content", out var contentArr) && contentArr.GetArrayLength() > 0)
         {
