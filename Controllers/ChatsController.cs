@@ -273,7 +273,7 @@ public class ChatsController : ControllerBase
             else if (lowerQuery.StartsWith("search ")) searchQuery = searchQuery.Substring(7);
 
             var searchResults = await SearchWebAsync(searchQuery);
-            aiPromptContent += $"\n\n[SYSTEM REAL-TIME SEARCH PROTOCOL: You have been provided with real-time web search results matching the query: '{searchQuery}'.\n\n{searchResults}\n\nYour Task: Generate a comprehensive, accurate response based on these results. Reference and cite your sources using bracketed numbers like [1], [2], etc., corresponding to the search results. Maintain a professional, highly informative, and analytical cybernetic Web Scout tone.]";
+            aiPromptContent += $"\n\n[SYSTEM REAL-TIME SEARCH PROTOCOL: Current Date is {DateTime.Now:dd MMMM yyyy}. You have been provided with real-time web search results matching the query: '{searchQuery}'.\n\n{searchResults}\n\nYour Task: Generate a comprehensive, accurate response based on these results. Reference and cite your sources using bracketed numbers like [1], [2], etc., corresponding to the search results. Maintain a professional, highly informative, and analytical cybernetic Web Scout tone.]";
         }
         else if (activePersonalityId == "video_summarizer" && attachmentType == "video")
         {
@@ -954,7 +954,30 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
             // Set User-Agent to mimic a real browser to avoid being blocked
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36");
             
-            var url = $"https://html.duckduckgo.com/html/?q={Uri.EscapeDataString(query)}";
+            // Dynamic Date Filter: Prioritize fresh info if user asks for recent/news/current topics
+            string dateFilter = "";
+            string lowerQuery = query.ToLower();
+            bool isNewsQuery = lowerQuery.Contains("terbaru") || 
+                               lowerQuery.Contains("terkini") || 
+                               lowerQuery.Contains("berita") || 
+                               lowerQuery.Contains("news") || 
+                               lowerQuery.Contains("latest") || 
+                               lowerQuery.Contains("recent") || 
+                               lowerQuery.Contains("current") ||
+                               lowerQuery.Contains("presiden") ||
+                               lowerQuery.Contains("2026") ||
+                               lowerQuery.Contains("2025");
+
+            if (lowerQuery.Contains("hari ini") || lowerQuery.Contains("today") || lowerQuery.Contains("kemarin") || lowerQuery.Contains("yesterday"))
+            {
+                dateFilter = "&df=d"; // Past 24 hours
+            }
+            else if (isNewsQuery)
+            {
+                dateFilter = "&df=w"; // Past week
+            }
+
+            var url = $"https://html.duckduckgo.com/html/?q={Uri.EscapeDataString(query)}{dateFilter}";
             var response = await client.GetAsync(url);
             if (!response.IsSuccessStatusCode)
             {
