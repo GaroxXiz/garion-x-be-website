@@ -25,8 +25,8 @@ public interface IChatRepository
     Task<User> RegisterUserAsync(User user);
     Task UpdateUserPasswordAsync(string username, string newPasswordHash);
     Task UpdateUserProfileAsync(Guid userId, string name, string email, string? avatarUrl);
-    Task<IEnumerable<TokenUsage>> GetTokenUsagesAsync();
-    Task IncrementTokenUsageAsync(string model, long tokensUsed);
+    Task<IEnumerable<TokenUsage>> GetTokenUsagesAsync(Guid userId);
+    Task IncrementTokenUsageAsync(Guid userId, string model, long tokensUsed);
     Task TogglePinChatAsync(Guid chatId);
     Task ToggleArchiveChatAsync(Guid chatId);
     Task<string> ShareChatAsync(Guid chatId);
@@ -233,10 +233,13 @@ public class ChatRepository : IChatRepository
         return changed;
     }
 
-    public async Task<IEnumerable<TokenUsage>> GetTokenUsagesAsync()
+    public async Task<IEnumerable<TokenUsage>> GetTokenUsagesAsync(Guid userId)
     {
         var now = DateTime.UtcNow;
-        var usages = await _dbContext.TokenUsages.ToListAsync();
+        var usages = await _dbContext.TokenUsages
+            .Where(t => t.UserId == userId)
+            .ToListAsync();
+            
         bool changed = false;
         foreach (var usage in usages)
         {
@@ -250,14 +253,53 @@ public class ChatRepository : IChatRepository
             await _dbContext.SaveChangesAsync();
         }
 
+        // Ensure default records exist for this user if they don't have any yet
+        var models = new[] { "openai", "gemini", "claude" };
+        var addedAny = false;
+        foreach (var model in models)
+        {
+            if (!usages.Any(u => u.Model == model))
+            {
+                var nextMonthly = GetNextMonthlyReset(now);
+                var nextWeekly = GetNextWeeklyReset(now);
+                var nextFiveHourly = GetNextFiveHourlyReset(now);
+                
+                var newRecord = new TokenUsage
+                {
+                    Model = model,
+                    UserId = userId,
+                    TotalTokensUsed = 0,
+                    TotalRequests = 0,
+                    CreatedAt = now,
+                    UpdatedAt = now,
+                    MonthlyTokensUsed = 0,
+                    MonthlyRequests = 0,
+                    MonthlyResetTime = nextMonthly,
+                    WeeklyTokensUsed = 0,
+                    WeeklyRequests = 0,
+                    WeeklyResetTime = nextWeekly,
+                    FiveHourlyTokensUsed = 0,
+                    FiveHourlyRequests = 0,
+                    FiveHourlyResetTime = nextFiveHourly
+                };
+                _dbContext.TokenUsages.Add(newRecord);
+                usages.Add(newRecord);
+                addedAny = true;
+            }
+        }
+        if (addedAny)
+        {
+            await _dbContext.SaveChangesAsync();
+        }
+
         return usages.OrderBy(t => t.Model);
     }
 
-    public async Task IncrementTokenUsageAsync(string model, long tokensUsed)
+    public async Task IncrementTokenUsageAsync(Guid userId, string model, long tokensUsed)
     {
         var now = DateTime.UtcNow;
         var existing = await _dbContext.TokenUsages
-            .FirstOrDefaultAsync(t => t.Model == model);
+            .FirstOrDefaultAsync(t => t.Model == model && t.UserId == userId);
 
         if (existing == null)
         {
@@ -268,6 +310,7 @@ public class ChatRepository : IChatRepository
             _dbContext.TokenUsages.Add(new TokenUsage
             {
                 Model = model,
+                UserId = userId,
                 TotalTokensUsed = tokensUsed,
                 TotalRequests = 1,
                 CreatedAt = now,

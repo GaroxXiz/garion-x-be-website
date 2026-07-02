@@ -2,10 +2,12 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Authorization;
 using GarionX.Repositories;
 
 namespace GarionX.Controllers;
 
+[Authorize]
 [ApiController]
 [Route("api/[controller]")]
 public class UsageController : ControllerBase
@@ -48,10 +50,27 @@ public class UsageController : ControllerBase
         _chatRepository = chatRepository;
     }
 
+    private Guid? GetUserId()
+    {
+        var userIdString = User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value 
+                           ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userIdString) || !Guid.TryParse(userIdString, out var userId))
+        {
+            return null;
+        }
+        return userId;
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetUsage()
     {
-        var usages = (await _chatRepository.GetTokenUsagesAsync()).ToList();
+        var userId = GetUserId();
+        if (userId == null)
+        {
+            return Unauthorized("Invalid token claims.");
+        }
+
+        var usages = (await _chatRepository.GetTokenUsagesAsync(userId.Value)).ToList();
 
         var models = new[] { "openai", "gemini", "claude" };
         var displayNames = new Dictionary<string, string>

@@ -90,11 +90,20 @@ public class GarionXDbContext : DbContext
             entity.ToTable("token_usages");
             entity.HasKey(t => t.Id);
             entity.Property(t => t.Model).HasMaxLength(50).IsRequired();
-            entity.HasIndex(t => t.Model).IsUnique();
+            entity.Property(t => t.UserId).IsRequired();
+            
+            // Unique index for specific model per user
+            entity.HasIndex(t => new { t.Model, t.UserId }).IsUnique();
+            
             entity.Property(t => t.TotalTokensUsed).IsRequired();
             entity.Property(t => t.TotalRequests).IsRequired();
             entity.Property(t => t.CreatedAt).IsRequired();
             entity.Property(t => t.UpdatedAt).IsRequired();
+
+            entity.HasOne(t => t.User)
+                .WithMany()
+                .HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // Seed Personalities
