@@ -6,6 +6,8 @@ public class TokenUsage
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public string Model { get; set; } = string.Empty;       // "openai" | "gemini" | "claude"
+    public Guid UserId { get; set; }
+    public User? User { get; set; }
     public long TotalTokensUsed { get; set; } = 0;
     public long TotalRequests { get; set; } = 0;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
