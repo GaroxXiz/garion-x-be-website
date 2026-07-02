@@ -962,11 +962,9 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                                lowerQuery.Contains("berita") || 
                                lowerQuery.Contains("news") || 
                                lowerQuery.Contains("latest") || 
+                               lowerQuery.Contains("breaking") || 
                                lowerQuery.Contains("recent") || 
-                               lowerQuery.Contains("current") ||
-                               lowerQuery.Contains("presiden") ||
-                               lowerQuery.Contains("2026") ||
-                               lowerQuery.Contains("2025");
+                               lowerQuery.Contains("current");
 
             if (lowerQuery.Contains("hari ini") || lowerQuery.Contains("today") || lowerQuery.Contains("kemarin") || lowerQuery.Contains("yesterday"))
             {
@@ -1022,7 +1020,8 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                 // Fallback 2: Wikipedia Search API (Indonesian)
                 try
                 {
-                    var wikiUrl = $"https://id.wikipedia.org/w/api.php?action=query&list=search&srsearch={Uri.EscapeDataString(query)}&format=json&origin=*";
+                    string cleanedWikiQuery = CleanSearchQuery(query);
+                    var wikiUrl = $"https://id.wikipedia.org/w/api.php?action=query&list=search&srsearch={Uri.EscapeDataString(cleanedWikiQuery)}&format=json&origin=*";
                     var wikiResponse = await client.GetAsync(wikiUrl);
                     if (wikiResponse.IsSuccessStatusCode)
                     {
@@ -1051,7 +1050,8 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                 // Fallback 3: Wikipedia Search API (English)
                 try
                 {
-                    var wikiUrlEn = $"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={Uri.EscapeDataString(query)}&format=json&origin=*";
+                    string cleanedWikiQueryEn = CleanSearchQuery(query);
+                    var wikiUrlEn = $"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={Uri.EscapeDataString(cleanedWikiQueryEn)}&format=json&origin=*";
                     var wikiResponseEn = await client.GetAsync(wikiUrlEn);
                     if (wikiResponseEn.IsSuccessStatusCode)
                     {
@@ -1114,6 +1114,28 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
         {
             return $"[Error: Exception during web search: {ex.Message}]";
         }
+    }
+
+    private string CleanSearchQuery(string query)
+    {
+        string cleaned = query.ToLower();
+        cleaned = cleaned.Replace("siapa", "")
+                         .Replace("apakah", "")
+                         .Replace("bagaimana", "")
+                         .Replace("mengapa", "")
+                         .Replace("kapan", "")
+                         .Replace("dimana", "")
+                         .Replace("yang", "")
+                         .Replace("di", "")
+                         .Replace("ke", "")
+                         .Replace("dari", "")
+                         .Replace("who is", "")
+                         .Replace("what is", "")
+                         .Replace("where is", "")
+                         .Replace("tell me about", "");
+
+        cleaned = Regex.Replace(cleaned, @"\s+", " ").Trim();
+        return string.IsNullOrWhiteSpace(cleaned) ? query : cleaned;
     }
 
     private string StripHtmlTags(string input)
