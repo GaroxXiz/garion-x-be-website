@@ -1018,6 +1018,65 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                         return sb.ToString();
                     }
                 }
+
+                // Fallback 2: Wikipedia Search API (Indonesian)
+                try
+                {
+                    var wikiUrl = $"https://id.wikipedia.org/w/api.php?action=query&list=search&srsearch={Uri.EscapeDataString(query)}&format=json&origin=*";
+                    var wikiResponse = await client.GetAsync(wikiUrl);
+                    if (wikiResponse.IsSuccessStatusCode)
+                    {
+                        var wikiJson = await wikiResponse.Content.ReadAsStringAsync();
+                        var searchMatches = Regex.Matches(wikiJson, @"""title""\s*:\s*""(?<title>.*?)""[\s\S]*?""snippet""\s*:\s*""(?<snippet>.*?)""", RegexOptions.IgnoreCase);
+                        if (searchMatches.Count > 0)
+                        {
+                            sb.AppendLine("WIKIPEDIA SEARCH RESULTS (ID):");
+                            int wikiCount = Math.Min(searchMatches.Count, 3);
+                            for (int w = 0; w < wikiCount; w++)
+                            {
+                                var title = Regex.Unescape(searchMatches[w].Groups["title"].Value);
+                                var snippet = StripHtmlTags(Regex.Unescape(searchMatches[w].Groups["snippet"].Value)).Trim();
+                                var cleanTitle = title.Replace(" ", "_");
+                                sb.AppendLine($"[{w + 1}] Title: {title}");
+                                sb.AppendLine($"    URL: https://id.wikipedia.org/wiki/{Uri.EscapeDataString(cleanTitle)}");
+                                sb.AppendLine($"    Snippet: {snippet}");
+                                sb.AppendLine();
+                            }
+                            return sb.ToString();
+                        }
+                    }
+                }
+                catch {}
+
+                // Fallback 3: Wikipedia Search API (English)
+                try
+                {
+                    var wikiUrlEn = $"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={Uri.EscapeDataString(query)}&format=json&origin=*";
+                    var wikiResponseEn = await client.GetAsync(wikiUrlEn);
+                    if (wikiResponseEn.IsSuccessStatusCode)
+                    {
+                        var wikiJsonEn = await wikiResponseEn.Content.ReadAsStringAsync();
+                        var searchMatchesEn = Regex.Matches(wikiJsonEn, @"""title""\s*:\s*""(?<title>.*?)""[\s\S]*?""snippet""\s*:\s*""(?<snippet>.*?)""", RegexOptions.IgnoreCase);
+                        if (searchMatchesEn.Count > 0)
+                        {
+                            sb.AppendLine("WIKIPEDIA SEARCH RESULTS (EN):");
+                            int wikiCount = Math.Min(searchMatchesEn.Count, 3);
+                            for (int w = 0; w < wikiCount; w++)
+                            {
+                                var title = Regex.Unescape(searchMatchesEn[w].Groups["title"].Value);
+                                var snippet = StripHtmlTags(Regex.Unescape(searchMatchesEn[w].Groups["snippet"].Value)).Trim();
+                                var cleanTitle = title.Replace(" ", "_");
+                                sb.AppendLine($"[{w + 1}] Title: {title}");
+                                sb.AppendLine($"    URL: https://en.wikipedia.org/wiki/{Uri.EscapeDataString(cleanTitle)}");
+                                sb.AppendLine($"    Snippet: {snippet}");
+                                sb.AppendLine();
+                            }
+                            return sb.ToString();
+                        }
+                    }
+                }
+                catch {}
+
                 return "No recent search results found.";
             }
 
