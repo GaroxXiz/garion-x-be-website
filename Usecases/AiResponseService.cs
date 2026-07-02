@@ -114,10 +114,10 @@ public class AiResponseService : IAiResponseService
 
             if (model.Equals("arena", StringComparison.OrdinalIgnoreCase))
             {
-                // Run openai, gemini, and claude concurrently
-                var openaiTask = GetSingleResponseAsync(userId, userMessage, personalityId, "openai", isSuperAdmin, history, hasImage, systemPrompt);
-                var geminiTask = GetSingleResponseAsync(userId, userMessage, personalityId, "gemini", isSuperAdmin, history, hasImage, systemPrompt);
-                var claudeTask = GetSingleResponseAsync(userId, userMessage, personalityId, "claude", isSuperAdmin, history, hasImage, systemPrompt);
+                // Run openai, gemini, and claude concurrently using Groq only
+                var openaiTask = GetSingleResponseAsync(userId, userMessage, personalityId, "openai", isSuperAdmin, history, hasImage, systemPrompt, forceGroq: true);
+                var geminiTask = GetSingleResponseAsync(userId, userMessage, personalityId, "gemini", isSuperAdmin, history, hasImage, systemPrompt, forceGroq: true);
+                var claudeTask = GetSingleResponseAsync(userId, userMessage, personalityId, "claude", isSuperAdmin, history, hasImage, systemPrompt, forceGroq: true);
 
                 await Task.WhenAll(openaiTask, geminiTask, claudeTask);
 
@@ -145,7 +145,8 @@ public class AiResponseService : IAiResponseService
         bool isSuperAdmin,
         List<Message> history,
         bool hasImage,
-        string systemPrompt)
+        string systemPrompt,
+        bool forceGroq = false)
     {
         try
         {
@@ -201,7 +202,7 @@ public class AiResponseService : IAiResponseService
 
             if (modelKey == "gemini")
             {
-                if (hasGeminiKey)
+                if (hasGeminiKey && !forceGroq)
                 {
                     return await CallGeminiAsync(userId, systemPrompt, history);
                 }
@@ -217,7 +218,7 @@ public class AiResponseService : IAiResponseService
             }
             else if (modelKey == "claude")
             {
-                if (hasClaudeKey)
+                if (hasClaudeKey && !forceGroq)
                 {
                     return await CallClaudeAsync(userId, systemPrompt, history);
                 }
@@ -233,7 +234,7 @@ public class AiResponseService : IAiResponseService
             }
             else // Default or openai
             {
-                if (hasOpenAiKey)
+                if (hasOpenAiKey && !forceGroq)
                 {
                     return await CallOpenAiAsync(userId, systemPrompt, history);
                 }
