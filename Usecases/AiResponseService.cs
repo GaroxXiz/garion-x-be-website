@@ -189,39 +189,64 @@ public class AiResponseService : IAiResponseService
                 }
             }
 
+            var openaiKey = Environment.GetEnvironmentVariable("OPENAI_API_KEY");
+            var geminiKey = Environment.GetEnvironmentVariable("GEMINI_API_KEY");
+            var claudeKey = Environment.GetEnvironmentVariable("CLAUDE_API_KEY");
             var groqApiKey = Environment.GetEnvironmentVariable("GROQ_API_KEY");
+
+            bool hasOpenAiKey = !string.IsNullOrWhiteSpace(openaiKey) && openaiKey != "your_openai_api_key_here";
+            bool hasGeminiKey = !string.IsNullOrWhiteSpace(geminiKey) && geminiKey != "your_gemini_api_key_here";
+            bool hasClaudeKey = !string.IsNullOrWhiteSpace(claudeKey) && claudeKey != "your_claude_api_key_here";
             bool hasGroqKey = !string.IsNullOrWhiteSpace(groqApiKey) && groqApiKey != "your_groq_api_key_here";
 
-            if (hasGroqKey)
+            if (modelKey == "gemini")
             {
-                string groqModel = modelKey switch
+                if (hasGeminiKey)
                 {
-                    "gemini" => "llama-3.1-8b-instant",
-                    "claude" => "llama-3.3-70b-versatile",
-                    _ => "llama-3.3-70b-versatile"
-                };
-
-                if (hasImage)
-                {
-                    // Force a vision model on Groq when an image is present
-                    groqModel = "llama-3.2-11b-vision-preview";
+                    return await CallGeminiAsync(userId, systemPrompt, history);
                 }
-
-                return modelKey switch
+                else if (hasGroqKey)
                 {
-                    "gemini" => await CallGroqAsync(userId, systemPrompt, history, "gemini", groqModel),
-                    "claude" => await CallGroqAsync(userId, systemPrompt, history, "claude", groqModel),
-                    _ => await CallGroqAsync(userId, systemPrompt, history, "openai", groqModel)
-                };
+                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.1-8b-instant";
+                    return await CallGroqAsync(userId, systemPrompt, history, "gemini", groqModel);
+                }
+                else
+                {
+                    return "❌ Error: Gemini API key or Groq API key is not configured.";
+                }
             }
-            else
+            else if (modelKey == "claude")
             {
-                return modelKey switch
+                if (hasClaudeKey)
                 {
-                    "gemini" => await CallGeminiAsync(userId, systemPrompt, history),
-                    "claude" => await CallClaudeAsync(userId, systemPrompt, history),
-                    _ => await CallOpenAiAsync(userId, systemPrompt, history)
-                };
+                    return await CallClaudeAsync(userId, systemPrompt, history);
+                }
+                else if (hasGroqKey)
+                {
+                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
+                    return await CallGroqAsync(userId, systemPrompt, history, "claude", groqModel);
+                }
+                else
+                {
+                    return "❌ Error: Claude API key or Groq API key is not configured.";
+                }
+            }
+            else // Default or openai
+            {
+                if (hasOpenAiKey)
+                {
+                    return await CallOpenAiAsync(userId, systemPrompt, history);
+                }
+                else if (hasGroqKey)
+                {
+                    // Use a distinct model for OpenAI fallback on Groq so the columns are different!
+                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.2-3b-preview";
+                    return await CallGroqAsync(userId, systemPrompt, history, "openai", groqModel);
+                }
+                else
+                {
+                    return "❌ Error: OpenAI API key or Groq API key is not configured.";
+                }
             }
         }
         catch (Exception ex)
