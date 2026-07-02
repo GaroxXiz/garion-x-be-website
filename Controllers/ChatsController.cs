@@ -975,6 +975,26 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
             int count = Math.Min(titles.Count, Math.Min(snippets.Count, 3)); // top 3 results
             if (count == 0)
             {
+                // Fallback to DuckDuckGo Instant Answer JSON API (Cloud-friendly, zero API key)
+                var fallbackUrl = $"https://api.duckduckgo.com/?q={Uri.EscapeDataString(query)}&format=json&no_html=1";
+                var fallbackResponse = await client.GetAsync(fallbackUrl);
+                if (fallbackResponse.IsSuccessStatusCode)
+                {
+                    var json = await fallbackResponse.Content.ReadAsStringAsync();
+                    // Simple JSON regex match to extract AbstractText and AbstractURL
+                    var abstractMatch = Regex.Match(json, @"""AbstractText""\s*:\s*""(?<text>.*?)""", RegexOptions.IgnoreCase);
+                    var urlMatch = Regex.Match(json, @"""AbstractURL""\s*:\s*""(?<url>.*?)""", RegexOptions.IgnoreCase);
+                    
+                    if (abstractMatch.Success && !string.IsNullOrWhiteSpace(abstractMatch.Groups["text"].Value))
+                    {
+                        var text = Regex.Unescape(abstractMatch.Groups["text"].Value);
+                        var sourceUrl = urlMatch.Success ? Regex.Unescape(urlMatch.Groups["url"].Value) : "";
+                        sb.AppendLine($"[1] Title: {query} (Instant Answer)");
+                        sb.AppendLine($"    URL: {sourceUrl}");
+                        sb.AppendLine($"    Snippet: {text}");
+                        return sb.ToString();
+                    }
+                }
                 return "No recent search results found.";
             }
 
