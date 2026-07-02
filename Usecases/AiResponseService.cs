@@ -63,45 +63,6 @@ public class AiResponseService : IAiResponseService
             var user = await _chatRepository.GetUserByIdAsync(userId);
             bool isSuperAdmin = user != null && user.Email.Equals("superadmin@garionx.com", StringComparison.OrdinalIgnoreCase);
 
-            // Proactively check token usage constraints for non-superadmin users
-            if (!isSuperAdmin)
-            {
-                var modelKey = model.ToLower(); // "openai" | "gemini" | "claude"
-                var usages = (await _chatRepository.GetTokenUsagesAsync(userId)).ToList();
-                var usage = usages.FirstOrDefault(u => u.Model == modelKey);
-                if (usage != null)
-                {
-                    var fiveHourlyLimit = FiveHourlyBudgets.GetValueOrDefault(modelKey, 20_000);
-                    var weeklyLimit = WeeklyBudgets.GetValueOrDefault(modelKey, 100_000);
-                    var monthlyLimit = MonthlyBudgets.GetValueOrDefault(modelKey, 500_000);
-
-                    var now = DateTime.UtcNow;
-
-                    if (usage.FiveHourlyTokensUsed >= fiveHourlyLimit && now < usage.FiveHourlyResetTime)
-                    {
-                        var waitTime = usage.FiveHourlyResetTime - now;
-                        var hours = Math.Max(0, (int)waitTime.TotalHours);
-                        var minutes = Math.Max(0, waitTime.Minutes);
-                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token 5-jam ({fiveHourlyLimit:N0} token) untuk model ini. Silakan tunggu **{hours} jam {minutes} menit** hingga limit diperbarui (Waktu Reset: {usage.FiveHourlyResetTime.ToLocalTime():HH:mm:ss}).";
-                    }
-
-                    if (usage.WeeklyTokensUsed >= weeklyLimit && now < usage.WeeklyResetTime)
-                    {
-                        var waitTime = usage.WeeklyResetTime - now;
-                        var days = Math.Max(0, waitTime.Days);
-                        var hours = Math.Max(0, waitTime.Hours);
-                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token mingguan ({weeklyLimit:N0} token) untuk model ini. Silakan tunggu **{days} hari {hours} jam** hingga limit diperbarui.";
-                    }
-
-                    if (usage.MonthlyTokensUsed >= monthlyLimit && now < usage.MonthlyResetTime)
-                    {
-                        var waitTime = usage.MonthlyResetTime - now;
-                        var days = Math.Max(0, waitTime.Days);
-                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token bulanan ({monthlyLimit:N0} token) untuk model ini. Silakan tunggu **{days} hari** hingga limit diperbarui.";
-                    }
-                }
-            }
-
             var personality = await _chatRepository.GetPersonalityByIdAsync(personalityId);
             string systemPrompt = personality?.SystemPrompt ?? "You are a helpful assistant.";
             
@@ -151,12 +112,89 @@ public class AiResponseService : IAiResponseService
                 };
             }).ToList();
 
+            if (model.Equals("arena", StringComparison.OrdinalIgnoreCase))
+            {
+                // Run openai, gemini, and claude concurrently
+                var openaiTask = GetSingleResponseAsync(userId, userMessage, personalityId, "openai", isSuperAdmin, history, hasImage, systemPrompt);
+                var geminiTask = GetSingleResponseAsync(userId, userMessage, personalityId, "gemini", isSuperAdmin, history, hasImage, systemPrompt);
+                var claudeTask = GetSingleResponseAsync(userId, userMessage, personalityId, "claude", isSuperAdmin, history, hasImage, systemPrompt);
+
+                await Task.WhenAll(openaiTask, geminiTask, claudeTask);
+
+                return $"[ARENA_RESPONSE: openai]\n{openaiTask.Result}\n" +
+                       $"[ARENA_RESPONSE: gemini]\n{geminiTask.Result}\n" +
+                       $"[ARENA_RESPONSE: claude]\n{claudeTask.Result}";
+            }
+            else
+            {
+                return await GetSingleResponseAsync(userId, userMessage, personalityId, model, isSuperAdmin, history, hasImage, systemPrompt);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AiResponseService Error] Exception: {ex}");
+            return $"❌ Internal error: {ex.Message}";
+        }
+    }
+
+    private async Task<string> GetSingleResponseAsync(
+        Guid userId,
+        string userMessage,
+        string personalityId,
+        string modelKey,
+        bool isSuperAdmin,
+        List<Message> history,
+        bool hasImage,
+        string systemPrompt)
+    {
+        try
+        {
+            modelKey = modelKey.ToLower();
+
+            // Proactively check token usage constraints for non-superadmin users
+            if (!isSuperAdmin)
+            {
+                var usages = (await _chatRepository.GetTokenUsagesAsync(userId)).ToList();
+                var usage = usages.FirstOrDefault(u => u.Model == modelKey);
+                if (usage != null)
+                {
+                    var fiveHourlyLimit = FiveHourlyBudgets.GetValueOrDefault(modelKey, 20_000);
+                    var weeklyLimit = WeeklyBudgets.GetValueOrDefault(modelKey, 100_000);
+                    var monthlyLimit = MonthlyBudgets.GetValueOrDefault(modelKey, 500_000);
+
+                    var now = DateTime.UtcNow;
+
+                    if (usage.FiveHourlyTokensUsed >= fiveHourlyLimit && now < usage.FiveHourlyResetTime)
+                    {
+                        var waitTime = usage.FiveHourlyResetTime - now;
+                        var hours = Math.Max(0, (int)waitTime.TotalHours);
+                        var minutes = Math.Max(0, waitTime.Minutes);
+                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token 5-jam ({fiveHourlyLimit:N0} token) untuk model ini. Silakan tunggu **{hours} jam {minutes} menit** hingga limit diperbarui (Waktu Reset: {usage.FiveHourlyResetTime.ToLocalTime():HH:mm:ss}).";
+                    }
+
+                    if (usage.WeeklyTokensUsed >= weeklyLimit && now < usage.WeeklyResetTime)
+                    {
+                        var waitTime = usage.WeeklyResetTime - now;
+                        var days = Math.Max(0, waitTime.Days);
+                        var hours = Math.Max(0, waitTime.Hours);
+                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token mingguan ({weeklyLimit:N0} token) untuk model ini. Silakan tunggu **{days} hari {hours} jam** hingga limit diperbarui.";
+                    }
+
+                    if (usage.MonthlyTokensUsed >= monthlyLimit && now < usage.MonthlyResetTime)
+                    {
+                        var waitTime = usage.MonthlyResetTime - now;
+                        var days = Math.Max(0, waitTime.Days);
+                        return $"⚠️ **[Limit Token Tercapai]** Anda telah mencapai limit penggunaan token bulanan ({monthlyLimit:N0} token) untuk model ini. Silakan tunggu **{days} hari** hingga limit diperbarui.";
+                    }
+                }
+            }
+
             var groqApiKey = Environment.GetEnvironmentVariable("GROQ_API_KEY");
             bool hasGroqKey = !string.IsNullOrWhiteSpace(groqApiKey) && groqApiKey != "your_groq_api_key_here";
 
             if (hasGroqKey)
             {
-                string groqModel = model.ToLower() switch
+                string groqModel = modelKey switch
                 {
                     "gemini" => "llama-3.1-8b-instant",
                     "claude" => "llama-3.3-70b-versatile",
@@ -169,7 +207,7 @@ public class AiResponseService : IAiResponseService
                     groqModel = "llama-3.2-11b-vision-preview";
                 }
 
-                return model.ToLower() switch
+                return modelKey switch
                 {
                     "gemini" => await CallGroqAsync(userId, systemPrompt, history, "gemini", groqModel),
                     "claude" => await CallGroqAsync(userId, systemPrompt, history, "claude", groqModel),
@@ -178,7 +216,7 @@ public class AiResponseService : IAiResponseService
             }
             else
             {
-                return model.ToLower() switch
+                return modelKey switch
                 {
                     "gemini" => await CallGeminiAsync(userId, systemPrompt, history),
                     "claude" => await CallClaudeAsync(userId, systemPrompt, history),
@@ -188,8 +226,8 @@ public class AiResponseService : IAiResponseService
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"[AiResponseService Error] Exception: {ex}");
-            return $"❌ Internal error: {ex.Message}";
+            Console.WriteLine($"[AiResponseService - SingleModel Error] Exception: {ex}");
+            return $"❌ Model error: {ex.Message}";
         }
     }
 
