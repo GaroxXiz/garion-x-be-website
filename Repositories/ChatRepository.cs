@@ -31,6 +31,9 @@ public interface IChatRepository
     Task ToggleArchiveChatAsync(Guid chatId);
     Task<string> ShareChatAsync(Guid chatId);
     Task<Chat?> GetSharedChatAsync(string shareToken);
+    Task<IEnumerable<UserMemory>> GetMemoriesAsync(Guid userId);
+    Task SaveOrUpdateMemoryAsync(Guid userId, string key, string value);
+    Task DeleteMemoryAsync(Guid userId, string key);
 }
 
 public class ChatRepository : IChatRepository
@@ -68,6 +71,51 @@ public class ChatRepository : IChatRepository
         _dbContext.Chats.Add(chat);
         await _dbContext.SaveChangesAsync();
         return chat;
+    }
+
+    public async Task<IEnumerable<UserMemory>> GetMemoriesAsync(Guid userId)
+    {
+        return await _dbContext.UserMemories
+            .Where(m => m.UserId == userId)
+            .OrderBy(m => m.Key)
+            .ToListAsync();
+    }
+
+    public async Task SaveOrUpdateMemoryAsync(Guid userId, string key, string value)
+    {
+        var existing = await _dbContext.UserMemories
+            .FirstOrDefaultAsync(m => m.UserId == userId && m.Key.ToLower() == key.ToLower());
+
+        if (existing != null)
+        {
+            existing.Value = value;
+            existing.UpdatedAt = DateTime.UtcNow;
+        }
+        else
+        {
+            var memory = new UserMemory
+            {
+                UserId = userId,
+                Key = key,
+                Value = value,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _dbContext.UserMemories.Add(memory);
+        }
+        await _dbContext.SaveChangesAsync();
+    }
+
+    public async Task DeleteMemoryAsync(Guid userId, string key)
+    {
+        var existing = await _dbContext.UserMemories
+            .FirstOrDefaultAsync(m => m.UserId == userId && m.Key.ToLower() == key.ToLower());
+
+        if (existing != null)
+        {
+            _dbContext.UserMemories.Remove(existing);
+            await _dbContext.SaveChangesAsync();
+        }
     }
 
     public async Task DeleteChatAsync(Guid chatId)

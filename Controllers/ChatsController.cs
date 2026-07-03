@@ -25,11 +25,13 @@ public class ChatsController : ControllerBase
 {
     private readonly IChatRepository _chatRepository;
     private readonly IAiResponseService _aiResponseService;
+    private readonly HttpClient _httpClient;
 
-    public ChatsController(IChatRepository chatRepository, IAiResponseService aiResponseService)
+    public ChatsController(IChatRepository chatRepository, IAiResponseService aiResponseService, HttpClient httpClient)
     {
         _chatRepository = chatRepository;
         _aiResponseService = aiResponseService;
+        _httpClient = httpClient;
     }
 
     private Guid? GetUserId()
@@ -546,6 +548,22 @@ public class ChatsController : ControllerBase
 
         // 5. Save AI message
         var botMsg = await _chatRepository.AddMessageAsync(chatId, "assistant", botReplyContent, replyAttachmentUrl, replyAttachmentType);
+
+        // 6. Asynchronously extract and save user memories in the background (fire-and-forget)
+        if (userId != null)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await ExtractAndSaveMemoryAsync((Guid)userId, request.Content, botReplyContent);
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Memory Extraction Background Task Error]: {ex.Message}");
+                }
+            });
+        }
 
         var response = new SendMessageResponse
         {
@@ -1190,5 +1208,87 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
     private string StripHtmlTags(string input)
     {
         return Regex.Replace(input, "<.*?>", string.Empty);
+    }
+
+    private async Task ExtractAndSaveMemoryAsync(Guid userId, string userMsg, string botReply)
+    {
+        var groqApiKey = Environment.GetEnvironmentVariable("GROQ_API_KEY");
+        if (string.IsNullOrWhiteSpace(groqApiKey) || groqApiKey == "your_groq_api_key_here")
+        {
+            return; // Groq API key is not configured, skip long-term memory extraction
+        }
+
+        try
+        {
+            var systemPrompt = @"You are a Cybernetic User Memory Extractor. Your task is to analyze the user's message and the assistant's response.
+Identify any permanent, long-term personal facts, traits, names, relationships, jobs, locations, or explicit user preferences mentioned (e.g. 'I have a dog named Max', 'My favorite programming language is Go', 'My name is Sarah').
+Ignore temporary conversational text, questions, greetings, or short-term topics.
+Return ONLY a valid JSON array of objects. Each object MUST have a 'key' (specific topic) and 'value' (the fact).
+Example: [{""key"": ""User's dog"", ""value"": ""Max""}, {""key"": ""Favorite Language"", ""value"": ""Go""}]
+If there are no new long-term facts introduced, return exactly an empty array: [].
+Do NOT wrap the output in markdown code blocks like ```json. Do NOT provide explanations. Return raw JSON text only.";
+
+            var payload = new
+            {
+                model = "llama-3.1-8b-instant",
+                messages = new[]
+                {
+                    new { role = "system", content = systemPrompt },
+                    new { role = "user", content = $"User Message: \"{userMsg}\"\nAssistant Reply: \"{botReply}\"" }
+                },
+                temperature = 0.1
+            };
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, "https://api.groq.com/openai/v1/chat/completions");
+            request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", groqApiKey);
+
+            using var response = await _httpClient.SendAsync(request);
+            if (!response.IsSuccessStatusCode)
+            {
+                Console.WriteLine($"[Memory Extraction API Error] status={response.StatusCode}");
+                return;
+            }
+
+            var rawBody = await response.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(rawBody);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("choices", out var choices) && choices.GetArrayLength() > 0)
+            {
+                var contentJson = choices[0].GetProperty("message").GetProperty("content").GetString()?.Trim() ?? "[]";
+                
+                // Clean any accidental markdown fence wrapper if AI returned one
+                if (contentJson.StartsWith("```"))
+                {
+                    contentJson = Regex.Replace(contentJson, @"^```(?:json)?\n|```$", "", RegexOptions.IgnoreCase).Trim();
+                }
+
+                if (contentJson == "[]") return;
+
+                using var parsedMem = JsonDocument.Parse(contentJson);
+                if (parsedMem.RootElement.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (var item in parsedMem.RootElement.EnumerateArray())
+                    {
+                        if (item.TryGetProperty("key", out var kProp) && item.TryGetProperty("value", out var vProp))
+                        {
+                            string key = kProp.GetString()?.Trim() ?? "";
+                            string val = vProp.GetString()?.Trim() ?? "";
+
+                            if (!string.IsNullOrEmpty(key) && !string.IsNullOrEmpty(val))
+                            {
+                                Console.WriteLine($"[Long-Term Memory Extracted] User={userId}: {key} = {val}");
+                                await _chatRepository.SaveOrUpdateMemoryAsync(userId, key, val);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[ExtractAndSaveMemoryAsync Error]: {ex.Message}");
+        }
     }
 }
