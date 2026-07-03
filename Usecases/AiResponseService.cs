@@ -106,6 +106,14 @@ public class AiResponseService : IAiResponseService
             var now = DateTime.Now;
             systemPrompt += $"\n\n[TEMPORAL CONTEXT: Today's date is {now:dddd, dd MMMM yyyy}. The current year is {now.Year}. Your knowledge may have a training cutoff, but you should always acknowledge that the current year is {now.Year} and use any search results or context provided to answer with the most up-to-date information available.]";
 
+            // Inject long-term user memories
+            var memories = await _chatRepository.GetMemoriesAsync(userId);
+            if (memories.Any())
+            {
+                var memoryBlocks = string.Join("\n", memories.Select(m => $"- {m.Key}: {m.Value}"));
+                systemPrompt += $"\n\n[USER MEMORY - What you remember about this user from previous chats:\n{memoryBlocks}\nUse this information naturally when relevant without explicitly stating 'According to my memory' unless asked.]";
+            }
+
             // Global instruction for multilingual / auto-translate support
             systemPrompt += "\n\n[System Instruction: You must respond in the same language as the user's message. If the user writes in Indonesian, respond in Indonesian. If they write in English, Spanish, Japanese, French, or any other language, automatically adapt and respond in that exact language while preserving your assigned personality, tone, and character.]";
 
