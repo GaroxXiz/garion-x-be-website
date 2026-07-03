@@ -14,6 +14,7 @@ public class GarionXDbContext : DbContext
     public DbSet<Personality> Personalities => Set<Personality>();
     public DbSet<User> Users => Set<User>();
     public DbSet<TokenUsage> TokenUsages => Set<TokenUsage>();
+    public DbSet<UserMemory> UserMemories => Set<UserMemory>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -103,6 +104,25 @@ public class GarionXDbContext : DbContext
             entity.HasOne(t => t.User)
                 .WithMany()
                 .HasForeignKey(t => t.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // UserMemory configurations
+        modelBuilder.Entity<UserMemory>(entity =>
+        {
+            entity.ToTable("user_memories");
+            entity.HasKey(m => m.Id);
+            entity.Property(m => m.UserId).IsRequired();
+            entity.Property(m => m.Key).HasMaxLength(150).IsRequired();
+            entity.Property(m => m.Value).IsRequired();
+            entity.Property(m => m.CreatedAt).IsRequired();
+            entity.Property(m => m.UpdatedAt).IsRequired();
+
+            entity.HasIndex(m => new { m.UserId, m.Key }).IsUnique();
+
+            entity.HasOne(m => m.User)
+                .WithMany()
+                .HasForeignKey(m => m.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
