@@ -247,18 +247,9 @@ public class ChatsController : ControllerBase
             await _chatRepository.UpdateChatTitleAsync(chatId, truncatedTitle);
         }
 
-        // Determine active personality (handle auto routing when GarionX Core is selected)
+        // Determine active personality (GarionX Core now answers general questions directly without auto-routing)
         string activePersonalityId = chat.PersonalityId;
         bool isAutoRouted = false;
-        if (chat.PersonalityId == "garionx")
-        {
-            var classification = await ClassifyPersonalityAsync(request.Content);
-            if (classification != "garionx")
-            {
-                activePersonalityId = classification;
-                isAutoRouted = true;
-            }
-        }
 
         // 3. Enrich context for AI video summarization or real-time web search
         string aiPromptContent = request.Content;
