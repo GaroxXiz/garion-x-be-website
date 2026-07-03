@@ -251,7 +251,7 @@ public class AiResponseService : IAiResponseService
                 else if (hasGroqKey)
                 {
                     // Use a distinct model for OpenAI fallback on Groq so the columns are different!
-                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.2-3b-instruct";
+                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama3-8b-8192";
                     return await CallGroqAsync(userId, systemPrompt, history, "openai", groqModel);
                 }
                 else
