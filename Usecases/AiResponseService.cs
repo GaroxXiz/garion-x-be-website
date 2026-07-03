@@ -44,6 +44,41 @@ public class AiResponseService : IAiResponseService
         { "claude", 300_000 }
     };
 
+    // Ordered preferred Groq model candidates per slot (tried in order until one succeeds)
+    private static readonly string[] GroqModelsSmall = new[]
+    {
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+        "gemma2-9b-it",
+        "gemma-7b-it"
+    };
+    private static readonly string[] GroqModelsMedium = new[]
+    {
+        "llama-3.1-8b-instant",
+        "llama3-8b-8192",
+        "gemma2-9b-it",
+        "qwen-qwq-32b"
+    };
+    private static readonly string[] GroqModelsLarge = new[]
+    {
+        "llama-3.3-70b-versatile",
+        "llama-3.3-70b-specdec",
+        "llama3-70b-8192",
+        "qwen-qwq-32b",
+        "llama-3.1-8b-instant"
+    };
+    private static readonly string[] GroqModelsVision = new[]
+    {
+        "llama-3.2-11b-vision-preview",
+        "llama-3.2-90b-vision-preview",
+        "llama-3.1-8b-instant"
+    };
+
+    // Cached list of active Groq model IDs (refreshed once per hour)
+    private static HashSet<string> _activeGroqModels = new();
+    private static DateTime _groqModelCacheTime = DateTime.MinValue;
+    private static readonly System.Threading.SemaphoreSlim _groqModelCacheLock = new System.Threading.SemaphoreSlim(1, 1);
+
     public AiResponseService(IChatRepository chatRepository, HttpClient httpClient)
     {
         _chatRepository = chatRepository;
@@ -66,7 +101,11 @@ public class AiResponseService : IAiResponseService
 
             var personality = await _chatRepository.GetPersonalityByIdAsync(personalityId);
             string systemPrompt = personality?.SystemPrompt ?? "You are a helpful assistant.";
-            
+
+            // Inject current real-world date so AI knows the actual year is 2026
+            var now = DateTime.Now;
+            systemPrompt += $"\n\n[TEMPORAL CONTEXT: Today's date is {now:dddd, dd MMMM yyyy}. The current year is {now.Year}. Your knowledge may have a training cutoff, but you should always acknowledge that the current year is {now.Year} and use any search results or context provided to answer with the most up-to-date information available.]";
+
             // Global instruction for multilingual / auto-translate support
             systemPrompt += "\n\n[System Instruction: You must respond in the same language as the user's message. If the user writes in Indonesian, respond in Indonesian. If they write in English, Spanish, Japanese, French, or any other language, automatically adapt and respond in that exact language while preserving your assigned personality, tone, and character.]";
 
@@ -218,8 +257,8 @@ public class AiResponseService : IAiResponseService
                 }
                 else if (hasGroqKey)
                 {
-                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.1-8b-instant";
-                    return await CallGroqAsync(userId, systemPrompt, history, "gemini", groqModel);
+                    var candidates = hasImage ? GroqModelsVision : GroqModelsMedium;
+                    return await CallGroqWithFallbackAsync(userId, systemPrompt, history, "gemini", candidates);
                 }
                 else
                 {
@@ -234,8 +273,8 @@ public class AiResponseService : IAiResponseService
                 }
                 else if (hasGroqKey)
                 {
-                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama-3.3-70b-versatile";
-                    return await CallGroqAsync(userId, systemPrompt, history, "claude", groqModel);
+                    var candidates = hasImage ? GroqModelsVision : GroqModelsLarge;
+                    return await CallGroqWithFallbackAsync(userId, systemPrompt, history, "claude", candidates);
                 }
                 else
                 {
@@ -250,9 +289,9 @@ public class AiResponseService : IAiResponseService
                 }
                 else if (hasGroqKey)
                 {
-                    // Use a distinct model for OpenAI fallback on Groq so the columns are different!
-                    string groqModel = hasImage ? "llama-3.2-11b-vision-preview" : "llama3-8b-8192";
-                    return await CallGroqAsync(userId, systemPrompt, history, "openai", groqModel);
+                    // Use a distinct smaller model for OpenAI slot so Arena columns are different!
+                    var candidates = hasImage ? GroqModelsVision : GroqModelsSmall;
+                    return await CallGroqWithFallbackAsync(userId, systemPrompt, history, "openai", candidates);
                 }
                 else
                 {
@@ -265,6 +304,32 @@ public class AiResponseService : IAiResponseService
             Console.WriteLine($"[AiResponseService - SingleModel Error] Exception: {ex}");
             return $"❌ Model error: {ex.Message}";
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Groq — Fallback chain wrapper: tries each candidate until one succeeds
+    // ─────────────────────────────────────────────────────────────────────
+    private async Task<string> CallGroqWithFallbackAsync(
+        Guid userId,
+        string systemPrompt,
+        IEnumerable<Message> history,
+        string slot,
+        string[] candidates)
+    {
+        string lastError = "No Groq model available.";
+        foreach (var candidate in candidates)
+        {
+            var result = await CallGroqAsync(userId, systemPrompt, history, slot, candidate);
+            // If the result is a model-not-found / decommissioned error, try next candidate
+            if (result.StartsWith("❌ Groq: Model") || result.Contains("decommissioned") || result.Contains("not found"))
+            {
+                Console.WriteLine($"[Groq Fallback] Model '{candidate}' unavailable for slot '{slot}', trying next...");
+                lastError = result;
+                continue;
+            }
+            return result;
+        }
+        return $"❌ Groq: Semua model kandidat tidak tersedia saat ini. Error terakhir: {lastError}";
     }
 
     // ─────────────────────────────────────────────────────────────────────
@@ -327,7 +392,7 @@ public class AiResponseService : IAiResponseService
 
         if (!response.IsSuccessStatusCode)
         {
-            Console.WriteLine($"[Groq Error ({slot})] HTTP {(int)response.StatusCode}: {rawBody}");
+            Console.WriteLine($"[Groq Error ({slot})] HTTP {(int)response.StatusCode} model='{groqModel}': {rawBody}");
             string friendly = TryExtractErrorMessage(rawBody);
             return response.StatusCode switch
             {
@@ -335,8 +400,12 @@ public class AiResponseService : IAiResponseService
                     $"❌ Groq: API key tidak valid. Periksa `GROQ_API_KEY` di file `.env`.\n\nDetail: {friendly}",
                 System.Net.HttpStatusCode.TooManyRequests =>
                     $"❌ Groq: Rate limit tercapai. Coba lagi sebentar.\n\nDetail: {friendly}",
+                System.Net.HttpStatusCode.NotFound =>
+                    $"❌ Groq: Model '{groqModel}' tidak ditemukan atau sudah deprecated.\n\nDetail: {friendly}",
+                System.Net.HttpStatusCode.BadRequest when friendly.Contains("decommissioned") || friendly.Contains("not found") =>
+                    $"❌ Groq: Model '{groqModel}' tidak ditemukan atau sudah deprecated.\n\nDetail: {friendly}",
                 System.Net.HttpStatusCode.BadRequest =>
-                    $"❌ Groq: Model '{groqModel}' tidak ditemukan atau request tidak valid.\n\nDetail: {friendly}",
+                    $"❌ Groq: Request tidak valid untuk model '{groqModel}'.\n\nDetail: {friendly}",
                 _ => $"❌ Groq error ({(int)response.StatusCode}): {friendly}"
             };
         }
