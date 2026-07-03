@@ -1027,20 +1027,51 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                     {
                         var wikiJson = await wikiResponse.Content.ReadAsStringAsync();
                         var searchMatches = Regex.Matches(wikiJson, @"""title""\s*:\s*""(?<title>.*?)""[\s\S]*?""snippet""\s*:\s*""(?<snippet>.*?)""", RegexOptions.IgnoreCase);
+                        
+                        sb.AppendLine("WIKIPEDIA SEARCH RESULTS (ID):");
+                        int resultCount = 0;
+
                         if (searchMatches.Count > 0)
                         {
-                            sb.AppendLine("WIKIPEDIA SEARCH RESULTS (ID):");
                             int wikiCount = Math.Min(searchMatches.Count, 3);
                             for (int w = 0; w < wikiCount; w++)
                             {
                                 var title = Regex.Unescape(searchMatches[w].Groups["title"].Value);
                                 var snippet = StripHtmlTags(Regex.Unescape(searchMatches[w].Groups["snippet"].Value)).Trim();
                                 var cleanTitle = title.Replace(" ", "_");
-                                sb.AppendLine($"[{w + 1}] Title: {title}");
+                                sb.AppendLine($"[{resultCount + 1}] Title: {title}");
                                 sb.AppendLine($"    URL: https://id.wikipedia.org/wiki/{Uri.EscapeDataString(cleanTitle)}");
                                 sb.AppendLine($"    Snippet: {snippet}");
                                 sb.AppendLine();
+                                resultCount++;
                             }
+                        }
+
+                        // Heuristic: If query relates to Indonesian presidency, append the List of Presidents article!
+                        if (lowerQuery.Contains("presiden"))
+                        {
+                            var listUrl = "https://id.wikipedia.org/w/api.php?action=query&list=search&srsearch=Daftar%20presiden%20Indonesia&format=json&origin=*";
+                            var listResponse = await client.GetAsync(listUrl);
+                            if (listResponse.IsSuccessStatusCode)
+                            {
+                                var listJson = await listResponse.Content.ReadAsStringAsync();
+                                var listMatches = Regex.Matches(listJson, @"""title""\s*:\s*""(?<title>.*?)""[\s\S]*?""snippet""\s*:\s*""(?<snippet>.*?)""", RegexOptions.IgnoreCase);
+                                if (listMatches.Count > 0)
+                                {
+                                    var title = Regex.Unescape(listMatches[0].Groups["title"].Value);
+                                    var snippet = StripHtmlTags(Regex.Unescape(listMatches[0].Groups["snippet"].Value)).Trim();
+                                    var cleanTitle = title.Replace(" ", "_");
+                                    sb.AppendLine($"[{resultCount + 1}] Title: {title}");
+                                    sb.AppendLine($"    URL: https://id.wikipedia.org/wiki/{Uri.EscapeDataString(cleanTitle)}");
+                                    sb.AppendLine($"    Snippet: {snippet}");
+                                    sb.AppendLine();
+                                    resultCount++;
+                                }
+                            }
+                        }
+
+                        if (resultCount > 0)
+                        {
                             return sb.ToString();
                         }
                     }
@@ -1057,20 +1088,51 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                     {
                         var wikiJsonEn = await wikiResponseEn.Content.ReadAsStringAsync();
                         var searchMatchesEn = Regex.Matches(wikiJsonEn, @"""title""\s*:\s*""(?<title>.*?)""[\s\S]*?""snippet""\s*:\s*""(?<snippet>.*?)""", RegexOptions.IgnoreCase);
+                        
+                        sb.AppendLine("WIKIPEDIA SEARCH RESULTS (EN):");
+                        int resultCount = 0;
+
                         if (searchMatchesEn.Count > 0)
                         {
-                            sb.AppendLine("WIKIPEDIA SEARCH RESULTS (EN):");
                             int wikiCount = Math.Min(searchMatchesEn.Count, 3);
                             for (int w = 0; w < wikiCount; w++)
                             {
                                 var title = Regex.Unescape(searchMatchesEn[w].Groups["title"].Value);
                                 var snippet = StripHtmlTags(Regex.Unescape(searchMatchesEn[w].Groups["snippet"].Value)).Trim();
                                 var cleanTitle = title.Replace(" ", "_");
-                                sb.AppendLine($"[{w + 1}] Title: {title}");
+                                sb.AppendLine($"[{resultCount + 1}] Title: {title}");
                                 sb.AppendLine($"    URL: https://en.wikipedia.org/wiki/{Uri.EscapeDataString(cleanTitle)}");
                                 sb.AppendLine($"    Snippet: {snippet}");
                                 sb.AppendLine();
+                                resultCount++;
                             }
+                        }
+
+                        // Heuristic: If query contains "president" or "presiden", append List of Presidents of Indonesia
+                        if (lowerQuery.Contains("president") || lowerQuery.Contains("presiden"))
+                        {
+                            var listUrlEn = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=List%20of%20presidents%20of%20Indonesia&format=json&origin=*";
+                            var listResponseEn = await client.GetAsync(listUrlEn);
+                            if (listResponseEn.IsSuccessStatusCode)
+                            {
+                                var listJsonEn = await listResponseEn.Content.ReadAsStringAsync();
+                                var listMatchesEn = Regex.Matches(listJsonEn, @"""title""\s*:\s*""(?<title>.*?)""[\s\S]*?""snippet""\s*:\s*""(?<snippet>.*?)""", RegexOptions.IgnoreCase);
+                                if (listMatchesEn.Count > 0)
+                                {
+                                    var title = Regex.Unescape(listMatchesEn[0].Groups["title"].Value);
+                                    var snippet = StripHtmlTags(Regex.Unescape(listMatchesEn[0].Groups["snippet"].Value)).Trim();
+                                    var cleanTitle = title.Replace(" ", "_");
+                                    sb.AppendLine($"[{resultCount + 1}] Title: {title}");
+                                    sb.AppendLine($"    URL: https://en.wikipedia.org/wiki/{Uri.EscapeDataString(cleanTitle)}");
+                                    sb.AppendLine($"    Snippet: {snippet}");
+                                    sb.AppendLine();
+                                    resultCount++;
+                                }
+                            }
+                        }
+
+                        if (resultCount > 0)
+                        {
                             return sb.ToString();
                         }
                     }
@@ -1125,10 +1187,6 @@ Respond with ONLY the lowercase string ID from the list above, with no markdown,
                          .Replace("mengapa", "")
                          .Replace("kapan", "")
                          .Replace("dimana", "")
-                         .Replace("yang", "")
-                         .Replace("di", "")
-                         .Replace("ke", "")
-                         .Replace("dari", "")
                          .Replace("who is", "")
                          .Replace("what is", "")
                          .Replace("where is", "")
