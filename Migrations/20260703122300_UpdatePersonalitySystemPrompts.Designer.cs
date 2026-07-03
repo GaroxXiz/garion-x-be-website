@@ -3,6 +3,7 @@ using System;
 using GarionX.Repositories;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 
@@ -11,9 +12,11 @@ using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 namespace GarionX.Migrations
 {
     [DbContext(typeof(GarionXDbContext))]
-    partial class GarionXDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260703122300_UpdatePersonalitySystemPrompts")]
+    partial class UpdatePersonalitySystemPrompts
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
