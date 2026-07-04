@@ -259,51 +259,50 @@ public class AiResponseService : IAiResponseService
 
             if (modelKey == "gemini")
             {
-                if (hasGeminiKey && !forceGroq)
-                {
-                    return await CallGeminiAsync(userId, systemPrompt, history);
-                }
-                else if (hasGroqKey)
+                if (hasGroqKey)
                 {
                     var candidates = hasImage ? GroqModelsVision : GroqModelsMedium;
                     return await CallGroqWithFallbackAsync(userId, systemPrompt, history, "gemini", candidates);
                 }
+                else if (hasGeminiKey)
+                {
+                    return await CallGeminiAsync(userId, systemPrompt, history);
+                }
                 else
                 {
-                    return "❌ Error: Gemini API key or Groq API key is not configured.";
+                    return "❌ Error: Groq API key or Gemini API key is not configured.";
                 }
             }
             else if (modelKey == "claude")
             {
-                if (hasClaudeKey && !forceGroq)
-                {
-                    return await CallClaudeAsync(userId, systemPrompt, history);
-                }
-                else if (hasGroqKey)
+                if (hasGroqKey)
                 {
                     var candidates = hasImage ? GroqModelsVision : GroqModelsLarge;
                     return await CallGroqWithFallbackAsync(userId, systemPrompt, history, "claude", candidates);
                 }
+                else if (hasClaudeKey)
+                {
+                    return await CallClaudeAsync(userId, systemPrompt, history);
+                }
                 else
                 {
-                    return "❌ Error: Claude API key or Groq API key is not configured.";
+                    return "❌ Error: Groq API key or Claude API key is not configured.";
                 }
             }
             else // Default or openai
             {
-                if (hasOpenAiKey && !forceGroq)
+                if (hasGroqKey)
                 {
-                    return await CallOpenAiAsync(userId, systemPrompt, history);
-                }
-                else if (hasGroqKey)
-                {
-                    // Use a distinct smaller model for OpenAI slot so Arena columns are different!
                     var candidates = hasImage ? GroqModelsVision : GroqModelsSmall;
                     return await CallGroqWithFallbackAsync(userId, systemPrompt, history, "openai", candidates);
                 }
+                else if (hasOpenAiKey)
+                {
+                    return await CallOpenAiAsync(userId, systemPrompt, history);
+                }
                 else
                 {
-                    return "❌ Error: OpenAI API key or Groq API key is not configured.";
+                    return "❌ Error: Groq API key or OpenAI API key is not configured.";
                 }
             }
         }
