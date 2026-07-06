@@ -362,13 +362,15 @@ public class AiResponseService : IAiResponseService
             };
         }
 
+        bool isVisionModel = groqModel.Contains("vision", StringComparison.OrdinalIgnoreCase);
+
         var messages = new List<object>
         {
             new { role = "system", content = systemPrompt }
         };
         foreach (var msg in history.TakeLast(11))
         {
-            if (msg.Sender == "user" && msg.AttachmentType == "image" && !string.IsNullOrEmpty(msg.AttachmentUrl))
+            if (isVisionModel && msg.Sender == "user" && msg.AttachmentType == "image" && !string.IsNullOrEmpty(msg.AttachmentUrl))
             {
                 var imageInfo = TryGetImageBase64(msg.AttachmentUrl);
                 if (imageInfo != null)
