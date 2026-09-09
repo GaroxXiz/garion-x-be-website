@@ -244,37 +244,45 @@ public class AuthController : ControllerBase
         }
 
         // 2. Find or register the user in our DB (username is matched to Google email)
-        var user = await _chatRepository.GetUserByUsernameAsync(email);
-        if (user == null)
+        try
         {
-            user = new User
+            var user = await _chatRepository.GetUserByUsernameAsync(email);
+            if (user == null)
             {
-                Username = email,
-                PasswordHash = "FIREBASE_AUTH_" + Guid.NewGuid().ToString(), // Placeholder password
-                Email = email,
-                Name = name,
-                AvatarUrl = picture ?? $"https://api.dicebear.com/7.x/bottts/svg?seed={Uri.EscapeDataString(email)}"
-            };
-            user = await _chatRepository.RegisterUserAsync(user);
-        }
-        else if (picture != null && user.AvatarUrl != picture)
-        {
-            // Update profile avatar if it changed on Google side
-            await _chatRepository.UpdateUserProfileAsync(user.Id, user.Name, user.Email, picture);
-            user = await _chatRepository.GetUserByIdAsync(user.Id) ?? user;
-        }
+                user = new User
+                {
+                    Username = email,
+                    PasswordHash = "FIREBASE_AUTH_" + Guid.NewGuid().ToString(), // Placeholder password
+                    Email = email,
+                    Name = name,
+                    AvatarUrl = picture ?? $"https://api.dicebear.com/7.x/bottts/svg?seed={Uri.EscapeDataString(email)}"
+                };
+                user = await _chatRepository.RegisterUserAsync(user);
+            }
+            else if (picture != null && user.AvatarUrl != picture)
+            {
+                // Update profile avatar if it changed on Google side
+                await _chatRepository.UpdateUserProfileAsync(user.Id, user.Name, user.Email, picture);
+                user = await _chatRepository.GetUserByIdAsync(user.Id) ?? user;
+            }
 
-        // 3. Generate system token
-        var token = _tokenGenerator.GenerateToken(user);
+            // 3. Generate system token
+            var token = _tokenGenerator.GenerateToken(user);
 
-        return Ok(new AuthResponse
+            return Ok(new AuthResponse
+            {
+                Token = token,
+                Username = user.Username,
+                Email = user.Email,
+                Name = user.Name,
+                AvatarUrl = user.AvatarUrl
+            });
+        }
+        catch (Exception ex)
         {
-            Token = token,
-            Username = user.Username,
-            Email = user.Email,
-            Name = user.Name,
-            AvatarUrl = user.AvatarUrl
-        });
+            Console.WriteLine($"[Google Login DB/Server Error] {ex.Message}\n{ex.StackTrace}");
+            return StatusCode(500, $"Google login failed due to backend database error: {ex.Message}");
+        }
     }
 
     [HttpPost("create-user")]
